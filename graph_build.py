@@ -5,13 +5,20 @@ from typing import List
 from obstacles import Obstacle
 
 ds = [(1, 0), (0, 1), (1, 1), (1, -1), (2, 1), (1, 2), (2, -1), (1, -2)]
-edge_sampling_params = [0.2, 0.4, 0.6, 0.8]
+ts = [0.2, 0.4, 0.6, 0.8]
 
 def blocked(p, obstacles: List[Obstacle]):
     for obstacle in obstacles:
         if obstacle.blocked(p):
             return True
     return False
+
+def segment_free(manifold: Manifold, x, y, obstacles):
+    for t in ts:
+        q = (1.0 - t) * x + t * y
+        if not manifold.in_domain(q) or blocked(q, obstacles):
+            return False
+    return True 
 
 
 def build_graph(manifold: Manifold, bounds, nx, ny, obstacles: List[Obstacle]):
@@ -41,19 +48,10 @@ def build_graph(manifold: Manifold, bounds, nx, ny, obstacles: List[Obstacle]):
                     neig_idx = idxs[x + dx, y + dy]
                     if neig_idx == -1:
                         continue
-                    
-                    can_connect = True
-                    for param in edge_sampling_params:
-                        q = (1 - param) * points[idx] + param * points[neig_idx]
-                        if not manifold.in_domain(q) or blocked(q, obstacles):
-                            can_connect = False
-                            break
-                    if not can_connect:
-                        continue
-                    
-                    w = manifold.segment_lenght(points[idx], points[neig_idx])
-                    adj[idx][neig_idx] = w
-                    adj[neig_idx][idx] = w
+                    if segment_free(manifold, points[idx], points[neig_idx], obstacles):
+                        w = manifold.segment_lenght(points[idx], points[neig_idx])
+                        adj[idx][neig_idx] = w
+                        adj[neig_idx][idx] = w
                     
     return points, adj
 
