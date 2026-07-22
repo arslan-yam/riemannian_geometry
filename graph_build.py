@@ -56,3 +56,25 @@ def build_graph(manifold: Manifold, bounds, nx, ny, obstacles: List[Obstacle]):
                     adj[neig_idx][idx] = w
                     
     return points, adj
+
+
+def connected_comps(adj):
+    n = len(adj)
+    labels = np.full(n, -1)
+    members = []
+    for s in range(n):
+        if labels[s] != -1:
+            continue
+        labels[s] = len(members)
+        stack = [s]
+        group = []
+        while stack:
+            v = stack.pop()
+            group.append(v)
+            for u in adj[v]:
+                if labels[u] == -1:
+                    labels[u] = len(members)
+                    stack.append(u)
+        members.append(group)
+    return labels, members
+    

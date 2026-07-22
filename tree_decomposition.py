@@ -55,7 +55,3 @@ def tree_decomposition(adj):
             root = v
             
     return pi, bags, parent, root, middle
-
-
-        
-                
