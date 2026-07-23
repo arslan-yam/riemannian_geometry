@@ -7,8 +7,8 @@ def dijkstra(adj, s, t=None):
     pred = np.full(n, -1)
     dist[s] = 0.0
     q = [(0.0, s)]
-    
-    while q is not None:
+
+    while q:
         curr_dist, v = heapq.heappop(q)
         if curr_dist > dist[v]:
             continue

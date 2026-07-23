@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.spatial import ckdtree
+from scipy.spatial import cKDTree
 from scipy.interpolate import RegularGridInterpolator
 from obstacles import Circle, Rectangle
 from manifolds import Manifold
@@ -22,7 +22,7 @@ def obstacle_distance(p, obstacles):
         elif isinstance(o, Rectangle):
             dx = max(o.sx - p[0], 0.0, p[0] - o.ex)
             dy = max(o.sy - p[1], 0.0, p[1] - o.ey)
-            d = np.hypot(dx, dy)
+            dist = min(dist, np.hypot(dx, dy))
     return dist
 
 
@@ -59,8 +59,8 @@ def gaussian_curvature(manifold, p, h=1e-2): #approximation using Brioschi formu
 
 def norm(field, mask):
     field_masked = field[mask]
-    if field_masked.size == 0:
-        return np.zeros_like(field_masked)
+    if field_masked.size == 0 or field_masked.max() <= 0:
+        return np.zeros_like(field)
     scale = np.percentile(field_masked, 95)
     if scale <= 0:
         scale = field_masked.max()
@@ -91,14 +91,14 @@ def difficulty_field(manifold: Manifold, bounds, obstacles, res=200, weights=(1.
             p = np.array([x, y])
             if manifold.in_domain(p) and not blocked(p, obstacles):
                 mask[i, j] = True
-            grad[i, j] = metric_grad_norm(manifold, p)
-            curv[i, j] = abs(gaussian_curvature(manifold, p))
-            dist[i, j] = obstacle_distance(p, obstacles)
+                grad[i, j] = metric_grad_norm(manifold, p)
+                curv[i, j] = abs(gaussian_curvature(manifold, p))
+                dist[i, j] = obstacle_distance(p, obstacles)
     
     grad = norm(grad, mask)
     curv = norm(curv, mask)
     dist = norm_obstacle(dist, mask, res, bounds, obstacles)
-    diff_field = np.where(mask, weights[0] * grad + weights[1] * curv + weights[2] * dist)
+    diff_field = np.where(mask, weights[0] * grad + weights[1] * curv + weights[2] * dist, 0.0)
     if diff_field.max() != 0:
         diff_field = diff_field / diff_field.max()
     return xs, ys, diff_field
@@ -182,7 +182,7 @@ def samlpe_boundary_points(manifold: Manifold, obstacles, bounds, offset=None, s
 def graph_from_points(manifold: Manifold, points, obstacles, k=8):
     points = np.asarray([np.asarray(p, dtype=float) for p in points])
     n = len(points)
-    tree = ckdtree(points)
+    tree = cKDTree(points)
     dists, indexs = tree.query(points, k=min(k + 1, n))
     indexs = np.atleast_2d(indexs)
     adj = [dict() for _ in range(n)]

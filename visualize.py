@@ -89,7 +89,7 @@ def plot_field(ax, xs, ys, field, manifold=None, cmap="magma", colorbar=False, l
 
 def plot_separators(ax, index, max_depth=4, show_portals=True, cmap="turbo"):
     segs, depths = [], []
-    for sid in range(index.num_separators):
+    for sid in range(index.num_seps):
         axis, sv, depth = index.sep_meta[sid]
         if depth > max_depth:
             continue
@@ -104,10 +104,10 @@ def plot_separators(ax, index, max_depth=4, show_portals=True, cmap="turbo"):
     ax.add_collection(lines)
     
     if show_portals:
-        ids = [index.sep_portals[s] for s in range(index.num_separators) if index.sep_meta[s][2] <= max_depth]
+        ids = [index.sep_portals[s] for s in range(index.num_seps) if index.sep_meta[s][2] <= max_depth]
         if ids:
             allp = np.unique(np.concatenate(ids))
-            ax.scatter(index.pts[allp, 0], index.pts[allp, 1], s=16, c="red", zorder=5, edgecolors="black", linewidths=0.3)
+            ax.scatter(index.points[allp, 0], index.points[allp, 1], s=16, c="red", zorder=5, edgecolors="black", linewidths=0.3)
 
 
 def plot_polyline(ax, coords, color="black", lw=2.0, ls="--", label=None, zorder=6):

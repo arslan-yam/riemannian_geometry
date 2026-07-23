@@ -5,7 +5,7 @@ from graph_build import connected_comps
 class H2HIndex:
     def __init__(self, adj):
         pi, bags, parent, root, middle = tree_decomposition(adj)
-        self.adj = self.adj
+        self.adj = adj
         self.n = len(adj)
         self.middle = middle
         self.root = root
@@ -18,7 +18,7 @@ class H2HIndex:
         self.children = children
         
         anc = [None] * self.n
-        depth = [0] * self.n
+        depth = np.zeros(self.n, dtype=np.int32)
         anc[root] = np.array([root])
         order = [root]
         stack = [root]
@@ -146,7 +146,7 @@ class H2HIndex:
         
     def query_path(self, s, t):
         if s == t:
-            return 0.0
+            return 0.0, [s]
         lca = self.lca(s, t)
         p = self.pos[lca]
         dists = self.dis[s, p] + self.dis[t, p]
@@ -162,7 +162,7 @@ class MultiH2HIndex:
         self.adj = adj
         self.n = len(adj)
         self.comp, self.members = connected_comps(adj)
-        self.local = np.full(self.n, -1)
+        self.local = np.full(self.n, -1, dtype=np.int64)
         self.indices = []
 
         for group in self.members:

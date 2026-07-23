@@ -1,7 +1,6 @@
 import numpy as np
-from scipy.spatial import ckdtree
+from scipy.spatial import cKDTree
 from dijkstra import dijkstra, get_path
-from graph_build import blocked, seg
 
 class SeparatorIndex:
     def __init__(self, points, adj, k=16, leaf_size=8, band_frac=1.6, max_depth=32):
@@ -19,7 +18,7 @@ class SeparatorIndex:
         self.sep_bbox = [] #data for drawing
         self.leaf_of = np.full(self.n, -1)
         self.anc = [[] for _ in range(self.n)]
-        self.labels = [dict() for _ in range(self.n)]
+        self.label = [dict() for _ in range(self.n)]
         self.leaves = []
         
         bound_box = (float(self.points[:, 0].min()), float(self.points[:, 0].max()), float(self.points[:, 1].min()), float(self.points[:, 1].max()))
@@ -32,7 +31,7 @@ class SeparatorIndex:
     def median_spacing(self):
         if self.n < 2:
             return 1.0
-        d, idxs = ckdtree(self.points).query(self.points, k=2)
+        d, idxs = cKDTree(self.points).query(self.points, k=2)
         return float(np.median(d[:, 1]))
     
     def subsample(self, candidates, other_axis):
@@ -60,11 +59,11 @@ class SeparatorIndex:
         if not left or not right:
             ms = sorted(points, key=lambda s: self.points[s, axis])
             mid = len(ms) // 2
-            left = ms[:mid],
+            left = ms[:mid]
             right = ms[mid:]
             sv = float(self.points[ms[mid], axis])
 
-        candidates = [s for s in points if abs(self.points[s, axis] - sv) <= self._band]
+        candidates = [s for s in points if abs(self.points[s, axis] - sv) <= self.band]
         if not candidates:
             candidates = sorted(points, key=lambda s: abs(self.points[s, axis] - sv))[:self.k]
         portals = self.subsample(candidates, 1 - axis)
@@ -90,7 +89,7 @@ class SeparatorIndex:
         return self.cache[src]
 
     def build_labels(self):
-        for sep_id, points in enumerate(self.sep_poinst):
+        for sep_id, points in enumerate(self.sep_points):
             portals = self.sep_portals[sep_id]
             dmat = np.empty((len(points), len(portals)))
             for j, p in enumerate(portals):

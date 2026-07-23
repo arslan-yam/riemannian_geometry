@@ -12,7 +12,7 @@ def tree_decomposition(adj):
     middle = {}
     
     while heap:
-        deg, v = heap.heappop(heap)
+        deg, v = heapq.heappop(heap)
         if eliminated[v]:
             continue
         if deg != len(H[v]):

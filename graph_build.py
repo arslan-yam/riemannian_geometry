@@ -58,7 +58,7 @@ def build_graph(manifold: Manifold, bounds, nx, ny, obstacles: List[Obstacle]):
 
 def connected_comps(adj):
     n = len(adj)
-    labels = np.full(n, -1)
+    labels = np.full(n, -1, dtype=int)
     members = []
     for s in range(n):
         if labels[s] != -1:
