@@ -43,7 +43,7 @@ def plot_obstacles(ax, obstacles, color="0.15", alpha=0.85, hatch=None):
             ax.add_patch(plt.Rectangle((obs.sx, obs.sy), obs.ex - obs.sx, obs.ey - obs.sy, facecolor=color, edgecolor="white", lw=1.0, alpha=alpha, hatch=hatch, zorder=5))
 
 
-def plot_graph(ax, points, adj, node_size=4, node_color="white", edge_color="0.6", edge_alpha=0.25, edge_width=0.5, show_edges=True):
+def plot_graph(ax, points, adj, node_size=4, node_color="white", edge_color="0.6", edge_alpha=0.5, edge_width=0.5, show_edges=True):
     points = np.asarray([np.asarray(p, dtype=float) for p in points])
     if show_edges:
         edges = [[points[v], points[u]] for v in range(len(adj)) for u in adj[v] if u > v]
