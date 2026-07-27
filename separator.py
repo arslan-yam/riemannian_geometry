@@ -1,15 +1,21 @@
+import heapq
 import numpy as np
 from scipy.spatial import cKDTree
 from dijkstra import dijkstra, get_path
+from heat_method import HeatMethod
+from eikonal import solve_eikonal, sample_points
+from refine import refine_path
 
 class SeparatorIndex:
-    def __init__(self, points, adj, k=16, leaf_size=8, band_frac=1.1, max_depth=32):
+    def __init__(self, points, adj, k=16, leaf_size=8, band_frac=1.1, max_depth=32, leaf_table=True, halo=1):
         self.points = np.array([np.asarray(p, dtype=float) for p in points])
         self.n = len(points)
         self.adj = adj
         self.k = k #portals per separator
         self.leaf_size = leaf_size #min points in a region
         self.max_depth = max_depth
+        self.use_leaf_table = leaf_table #cuts never separate a same-leaf pair, so store them exactly
+        self.halo = halo
         self.band = band_frac * self.median_spacing()
 
         self.sep_points = [] #points in separator region
@@ -24,10 +30,11 @@ class SeparatorIndex:
 
         bound_box = (float(self.points[:, 0].min()), float(self.points[:, 0].max()), float(self.points[:, 1].min()), float(self.points[:, 1].max()))
         self.build(list(range(self.n)), 0, bound_box)
-        self.rep = [self.anc[s][-1] if self.anc[s] else -1 for s in range(self.n)] #deepest separator per point
+        self.rep = [self.anc[s][-1] if self.anc[s] else -1 for s in range(self.n)]
         self.build_sep_lca()
         self.cache = {}
         self.build_labels()
+        self.build_leaf_tables()
         self.num_seps = len(self.sep_portals)
         self.max_portals = max((len(p) for p in self.sep_portals), default=0)
 
@@ -41,7 +48,7 @@ class SeparatorIndex:
         if len(candidates) <= self.k:
             return list(candidates)
         order = sorted(candidates, key=lambda s: self.points[s, other_axis])
-        idx = np.unique(np.linspace(0, len(order) - 1, self.k).round().astype(int)) #even coverage of the cut line
+        idx = np.unique(np.linspace(0, len(order) - 1, self.k).round().astype(int))
         return [order[i] for i in idx]
 
     def build(self, points, depth, bbox, parent=-1):
@@ -154,15 +161,65 @@ class SeparatorIndex:
             self.cache[src] = dijkstra(self.adj, src)
         return self.cache[src]
 
+    def portal_distances(self, src):
+        return self.dijkstra(src)[0]
+
     def build_labels(self):
         for sep_id, points in enumerate(self.sep_points):
             portals = self.sep_portals[sep_id]
             dmat = np.empty((len(points), len(portals)))
             for j, p in enumerate(portals):
-                dist, pred = self.dijkstra(int(p))
+                dist = self.portal_distances(int(p))
                 dmat[:, j] = dist[points]
             for i, s in enumerate(points):
                 self.label[s][sep_id] = dmat[i]
+
+    def local_dijkstra(self, src, allowed):
+        dist = {src: 0.0}
+        pred = {src: -1}
+        pq = [(0.0, src)]
+        while pq:
+            d, v = heapq.heappop(pq)
+            if d > dist[v]:
+                continue
+            for u, w in self.adj[v].items():
+                if u in allowed and d + w < dist.get(u, np.inf):
+                    dist[u] = d + w
+                    pred[u] = v
+                    heapq.heappush(pq, (d + w, u))
+        return dist, pred
+
+    def leaf_region(self, leaf_id):
+        allowed = set(self.leaves[leaf_id])
+        for _ in range(self.halo):
+            allowed = allowed | {u for v in allowed for u in self.adj[v]}
+        return allowed
+
+    def build_leaf_tables(self):
+        self.in_leaf = np.full(self.n, -1, dtype=int)
+        self.leaf_table = []
+        for leaf_id, members in enumerate(self.leaves):
+            for i, g in enumerate(members):
+                self.in_leaf[g] = i
+            if not self.use_leaf_table:
+                self.leaf_table.append(None)
+                continue
+            allowed = self.leaf_region(leaf_id)
+            D = np.full((len(members), len(members)), np.inf)
+            for i, s in enumerate(members):
+                dist, pred = self.local_dijkstra(s, allowed)
+                for j, g in enumerate(members):
+                    if g in dist:
+                        D[i, j] = dist[g]
+            self.leaf_table.append(D)
+
+    def leaf_bound(self, s, t):
+        if not self.use_leaf_table:
+            return float("inf")
+        leaf_id = self.leaf_of[s]
+        if leaf_id < 0 or leaf_id != self.leaf_of[t]:
+            return float("inf")
+        return float(self.leaf_table[leaf_id][self.in_leaf[s], self.in_leaf[t]])
 
     def lcs(self, s, t):
         u, v = self.rep[s], self.rep[t]
@@ -170,14 +227,17 @@ class SeparatorIndex:
             return None
         return self.sep_lca(u, v)
 
-    def query(self, s, t):
-        if s == t:
-            return 0.0
+    def portal_bound(self, s, t):
         sep = self.lcs(s, t)
         if sep is None:
             return float("inf")
         dists = self.label[s][sep] + self.label[t][sep]
         return float(dists.min())
+
+    def query(self, s, t):
+        if s == t:
+            return 0.0
+        return min(self.portal_bound(s, t), self.leaf_bound(s, t))
 
     def query_path(self, s, t):
         if s == t:
@@ -185,6 +245,14 @@ class SeparatorIndex:
         sep = self.lcs(s, t)
         if sep is None:
             return float("inf"), None
+
+        if self.leaf_bound(s, t) < self.portal_bound(s, t):
+            dist, pred = self.local_dijkstra(s, self.leaf_region(self.leaf_of[s]))
+            if t in dist:
+                path = [t]
+                while path[-1] != s:
+                    path.append(pred[path[-1]])
+                return float(dist[t]), path[::-1]
 
         portals = self.sep_portals[sep]
         dists = self.label[s][sep] + self.label[t][sep]
@@ -200,3 +268,93 @@ class SeparatorIndex:
         if l is None or r is None:
             return float(dists[i]), None
         return float(dists[i]), l[::-1] + r[1:]
+
+
+class SeparatorHeatIndex(SeparatorIndex):
+    def __init__(self, points, adj, manifold, k=16, leaf_size=8, band_frac=1.1, max_depth=32, t_factor=1.0, obstacles=()):
+        self.heat = HeatMethod(manifold, points, t_factor, obstacles)
+        self.heat_cache = {}
+        super().__init__(points, adj, k, leaf_size, band_frac, max_depth)
+
+    def portal_distances(self, src):
+        if src not in self.heat_cache:
+            self.heat_cache[src] = self.heat.distances(src)
+        return self.heat_cache[src]
+
+    def query_path(self, s, t):
+        raise NotImplementedError("heat labels carry no predecessors, use SeparatorIndex for paths")
+
+
+class SeparatorRefinedIndex(SeparatorIndex):
+    def __init__(self, points, adj, manifold, obstacles=(), k=16, leaf_size=8, band_frac=1.1,
+                 max_depth=32, leaf_table=True, halo=1, rounds=1, use_relax=True, segments=12):
+        self.manifold = manifold
+        self.obstacles = list(obstacles)
+        self.rounds = rounds
+        self.use_relax = use_relax
+        self.segments = segments
+        super().__init__(points, adj, k, leaf_size, band_frac, max_depth, leaf_table, halo)
+        self.refine_labels()
+
+    def refine_labels(self):
+        self.refined = 0
+        for sep_id, members in enumerate(self.sep_points):
+            portals = self.sep_portals[sep_id]
+            for j, p in enumerate(portals):
+                dist, pred = self.dijkstra(int(p))
+                for s in members:
+                    if s == int(p) or not np.isfinite(dist[s]):
+                        continue
+                    path = get_path(pred, int(p), s)
+                    if path is None or len(path) < 3:
+                        continue
+                    d, coords = refine_path(self.manifold, self.points, path, self.obstacles,
+                                            rounds=self.rounds, use_relax=self.use_relax, segments=self.segments)
+                    if d < self.label[s][sep_id][j]:
+                        self.label[s][sep_id][j] = d
+                        self.refined += 1
+
+
+class SeparatorEikonalIndex(SeparatorIndex):
+    def __init__(self, points, adj, manifold, bounds, res=121, k=16, leaf_size=8, band_frac=1.1, max_depth=32, obstacles=()):
+        self.manifold = manifold
+        self.bounds = bounds
+        self.res = res
+        self.obstacles = list(obstacles)
+        self.eik_cache = {}
+        self.coords = np.array([np.asarray(p, dtype=float) for p in points])
+        super().__init__(points, adj, k, leaf_size, band_frac, max_depth)
+
+    def portal_distances(self, src):
+        if src not in self.eik_cache:
+            xs, ys, u = solve_eikonal(self.manifold, self.bounds, self.res, self.res, [self.coords[src]], self.obstacles)
+            self.eik_cache[src] = sample_points(xs, ys, u, self.coords)
+        return self.eik_cache[src]
+
+    def query_path(self, s, t):
+        raise NotImplementedError("eikonal labels carry no predecessors, use SeparatorIndex for paths")
+
+
+class SeparatorContinuousIndex(SeparatorIndex):
+    def __init__(self, points, adj, k=16, leaf_size=8, band_frac=1.1, max_depth=32):
+        super().__init__(points, adj, k, leaf_size, band_frac, max_depth)
+        self.cross = []
+        for portals in self.sep_portals:
+            D = np.empty((len(portals), len(portals)))
+            for i, p in enumerate(portals):
+                D[i] = self.portal_distances(int(p))[portals]
+            self.cross.append(D)
+
+    def query(self, s, t):
+        if s == t:
+            return 0.0
+        sep = self.lcs(s, t)
+        if sep is None:
+            return float("inf")
+        a = self.label[s][sep]
+        b = self.label[t][sep]
+        cross = float((a[:, None] + self.cross[sep] + b[None, :]).min())
+        return min(cross, self.leaf_bound(s, t))
+
+    def query_path(self, s, t):
+        raise NotImplementedError("the cut-crossing walk is not reconstructed, use SeparatorIndex for paths")
