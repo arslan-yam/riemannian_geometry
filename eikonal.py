@@ -51,8 +51,8 @@ def solve_eikonal(manifold, bounds, nx, ny, sources, obstacles=()):
         for j in range(ny):
             p = np.array([xs[i], ys[j]])
             if manifold.in_domain(p) and not blocked(p, obstacles):
-                g = manifold.metric(p)
-                e[i, j], f[i, j], g[i, j] = g[0, 0], g[0, 1], g[1, 1]
+                gm = manifold.metric(p) #not g, that is the grid array of g[1, 1]
+                e[i, j], f[i, j], g[i, j] = gm[0, 0], gm[0, 1], gm[1, 1]
                 available[i, j] = True
 
     u = np.full((nx, ny), np.inf)
@@ -76,7 +76,7 @@ def solve_eikonal(manifold, bounds, nx, ny, sources, obstacles=()):
             a, b = i + dx, j + dy
             if not (0 <= a < nx and 0 <= b < ny) or not available[a, b] or accepted[a, b]:
                 continue
-            e, f, g = e[a, b], f[a, b], g[a, b]
+            ea, fa, ga = e[a, b], f[a, b], g[a, b] #scalars, do not shadow the grid arrays
             best = np.inf
             
             for m in range(8):
@@ -91,11 +91,11 @@ def solve_eikonal(manifold, bounds, nx, ny, sources, obstacles=()):
                 ax, ay = dx1 * hx, dy1 * hy
                 bx, by = dx2 * hx, dy2 * hy
                 if b1 and b2:
-                    cand = two_point(u[i1, j1], u[i2, j2], ax, ay, bx, by, e, f, g)
+                    cand = two_point(u[i1, j1], u[i2, j2], ax, ay, bx, by, ea, fa, ga)
                 elif b1:
-                    cand = u[i1, j1] + np.sqrt(quad(ax, ay, ax, ay, e, f, g))
+                    cand = u[i1, j1] + np.sqrt(quad(ax, ay, ax, ay, ea, fa, ga))
                 else:
-                    cand = u[i2, j2] + np.sqrt(quad(bx, by, bx, by, e, f, g))
+                    cand = u[i2, j2] + np.sqrt(quad(bx, by, bx, by, ea, fa, ga))
                 best = min(best, cand)
 
             if best < u[a, b]:
