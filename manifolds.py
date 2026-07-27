@@ -1,19 +1,74 @@
 import numpy as np
+from scipy.optimize import minimize
+
+
+gauss_cache = {}
+def gauss_legendre(n):
+    if n not in gauss_cache:
+        xs, ws = np.polynomial.legendre.leggauss(n)
+        gauss_cache[n] = (0.5 * (xs + 1.0), 0.5 * ws)
+    return gauss_cache[n]
+
 
 class Manifold:
     def metric(self, p):
         raise NotImplementedError
-    
+
     def in_domain(self, p):
         return True
-    
-    def segment_lenght(self, p, q, n=10):
-        delta = (q - p) / n
+
+    def segment_lenght(self, p, q, n=4):
+        delta = q - p
+        ts, ws = gauss_legendre(n)
         length = 0.0
-        for k in range(n):
-            mid_point = p + (k + 0.5) * delta
-            length += np.sqrt(delta.T @ self.metric(mid_point) @ delta)
+        for t, w in zip(ts, ws):
+            point = p + t * delta
+            length += w * np.sqrt(delta.T @ self.metric(point) @ delta)
         return length
+
+    def energy(self, points, m): 
+        e = 0.0
+        for i in range(m):
+            delta = points[i + 1] - points[i]
+            mid_point = 0.5 * (points[i] + points[i + 1])
+            e += delta.T @ self.metric(mid_point) @ delta
+        return m * e
+
+    def metric_grad(self, p, h=1e-4):
+        dx, dy = np.array([h, 0.0]), np.array([0.0, h])
+        gx = (self.metric(p + dx) - self.metric(p - dx)) / (2 * h)
+        gy = (self.metric(p + dy) - self.metric(p - dy)) / (2 * h)
+        return gx, gy
+
+    def energy_grad(self, points, m):
+        grad = np.zeros((len(points), 2))
+        for i in range(m):
+            delta = points[i + 1] - points[i]
+            mid_point = 0.5 * (points[i] + points[i + 1])
+            gd = 2.0 * (self.metric(mid_point) @ delta)
+            gx, gy = self.metric_grad(mid_point)
+            gmid = 0.5 * np.array([delta @ gx @ delta, delta @ gy @ delta])
+            grad[i + 1] += gd + gmid
+            grad[i] += -gd + gmid
+        return m * grad[1:-1].ravel()
+
+    def energy_and_grad(self, p, q, z, m):
+        points = np.vstack([p, z.reshape(-1, 2), q])
+        return self.energy(points, m), self.energy_grad(points, m)
+
+    def geodesic_path(self, p, q, m=8): #using minimize energy
+        p = np.asarray(p, dtype=float)
+        q = np.asarray(q, dtype=float)
+        if m < 2:
+            return np.vstack([p, q])
+        ts = np.linspace(0.0, 1.0, m + 1)[1:-1]
+        start = np.array([p + t * (q - p) for t in ts]).ravel()
+        res = minimize(lambda z: self.energy_and_grad(p, q, z, m), start, method="L-BFGS-B", jac=True)
+        return np.vstack([p, res.x.reshape(-1, 2), q])
+
+    def geodesic_lenght(self, p, q, m=8):
+        points = self.geodesic_path(p, q, m)
+        return sum(self.segment_lenght(points[i], points[i + 1]) for i in range(len(points) - 1))
 
 class Euclidean(Manifold):
     def metric(self, p):
