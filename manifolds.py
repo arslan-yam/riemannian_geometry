@@ -10,6 +10,14 @@ def gauss_legendre(n):
     return gauss_cache[n]
 
 
+def build_metric(fx, fy):
+    g = np.empty((len(fx), 2, 2))
+    g[:, 0, 0] = 1.0 + fx * fx
+    g[:, 0, 1] = g[:, 1, 0] = fx * fy
+    g[:, 1, 1] = 1.0 + fy * fy
+    return g
+
+
 class Manifold:
     def metric(self, p):
         raise NotImplementedError
@@ -26,13 +34,13 @@ class Manifold:
             length += w * np.sqrt(delta.T @ self.metric(point) @ delta)
         return length
 
-    def energy(self, points, m): 
-        e = 0.0
-        for i in range(m):
-            delta = points[i + 1] - points[i]
-            mid_point = 0.5 * (points[i] + points[i + 1])
-            e += delta.T @ self.metric(mid_point) @ delta
-        return m * e
+    def metric_batch(self, points): #override per manifold, this fallback is the slow path
+        return np.array([self.metric(p) for p in points])
+
+    def energy(self, points, m):
+        delta = points[1:] - points[:-1]
+        mid_point = 0.5 * (points[1:] + points[:-1])
+        return m * float(np.einsum("ij,ijk,ik->", delta, self.metric_batch(mid_point), delta))
 
     def metric_grad(self, p, h=1e-4):
         dx, dy = np.array([h, 0.0]), np.array([0.0, h])
@@ -40,16 +48,22 @@ class Manifold:
         gy = (self.metric(p + dy) - self.metric(p - dy)) / (2 * h)
         return gx, gy
 
+    def metric_grad_batch(self, points, h=1e-4):
+        dx, dy = np.array([h, 0.0]), np.array([0.0, h])
+        gx = (self.metric_batch(points + dx) - self.metric_batch(points - dx)) / (2 * h)
+        gy = (self.metric_batch(points + dy) - self.metric_batch(points - dy)) / (2 * h)
+        return gx, gy
+
     def energy_grad(self, points, m):
+        delta = points[1:] - points[:-1]
+        mid_point = 0.5 * (points[1:] + points[:-1])
+        gd = 2.0 * np.einsum("ijk,ik->ij", self.metric_batch(mid_point), delta)
+        gx, gy = self.metric_grad_batch(mid_point)
+        gmid = 0.5 * np.stack([np.einsum("ij,ijk,ik->i", delta, gx, delta),
+                               np.einsum("ij,ijk,ik->i", delta, gy, delta)], axis=1)
         grad = np.zeros((len(points), 2))
-        for i in range(m):
-            delta = points[i + 1] - points[i]
-            mid_point = 0.5 * (points[i] + points[i + 1])
-            gd = 2.0 * (self.metric(mid_point) @ delta)
-            gx, gy = self.metric_grad(mid_point)
-            gmid = 0.5 * np.array([delta @ gx @ delta, delta @ gy @ delta])
-            grad[i + 1] += gd + gmid
-            grad[i] += -gd + gmid
+        grad[1:] += gd + gmid
+        grad[:-1] += -gd + gmid
         return m * grad[1:-1].ravel()
 
     def energy_and_grad(self, p, q, z, m):
@@ -73,6 +87,9 @@ class Manifold:
 class Euclidean(Manifold):
     def metric(self, p):
         return np.eye(2)
+
+    def metric_batch(self, points):
+        return np.broadcast_to(np.eye(2), (len(points), 2, 2))
     
     def segment_lenght(self, p, q, n=10):
         return float(np.sqrt((q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2))
@@ -85,6 +102,10 @@ class PoincareDisk(Manifold):
         lmbd = 2.0 / (1.0 - float(p[0] ** 2 + p[1] ** 2))
         return (lmbd ** 2) * np.eye(2)
     
+    def metric_batch(self, points):
+        lmbd = 2.0 / (1.0 - (points ** 2).sum(1))
+        return (lmbd ** 2)[:, None, None] * np.eye(2)
+
     def in_domain(self, p):
         return p[0] ** 2 + p[1] ** 2 < self.rmax ** 2
     
@@ -127,6 +148,12 @@ class Terrain(Manifold):
         return np.array([[1.0 + fx * fx, fx * fy],
                          [fx * fy, 1.0 + fy * fy]])
 
+    def metric_batch(self, points):
+        x, y = points[:, 0], points[:, 1]
+        fx = self.amp * self.freq * np.cos(self.freq * x) * np.cos(self.freq * y)
+        fy = -self.amp * self.freq * np.sin(self.freq * x) * np.sin(self.freq * y)
+        return build_metric(fx, fy)
+
 
 class GaussianHills(Manifold):
     def __init__(self, hills):
@@ -151,3 +178,13 @@ class GaussianHills(Manifold):
         fx, fy = self.grad(p)
         return np.array([[1.0 + fx * fx, fx * fy],
                          [fx * fy, 1.0 + fy * fy]])
+
+    def metric_batch(self, points):
+        x, y = points[:, 0], points[:, 1]
+        fx = np.zeros(len(points))
+        fy = np.zeros(len(points))
+        for cx, cy, a, sg in self.hills:
+            e = a * np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2.0 * sg * sg))
+            fx += -e * (x - cx) / (sg * sg)
+            fy += -e * (y - cy) / (sg * sg)
+        return build_metric(fx, fy)

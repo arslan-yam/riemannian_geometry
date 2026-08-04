@@ -1,5 +1,4 @@
 import numpy as np
-from collections import deque
 from manifolds import Manifold
 from typing import List
 from obstacles import Obstacle
