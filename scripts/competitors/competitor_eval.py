@@ -27,10 +27,16 @@ if kind == "W2V":
     ours = json.load(open(os.path.join(root, "results", f"{tag}.json")))
     n_q = len(q)
     best = np.full(n_q, np.inf)
+    #only answers that are the cost of an actual path define the reference: interpolated answers
+    #(the certified index's estimate, the earlier index's + interp / + model interp) can lie below
+    #the truth, so they are scored against the reference but never lower it
+    is_path = lambda m: not ("(estimate)" in m or "interp" in m)
+    used = 0
     for r in ours["rows"]:
         v = r.get("values")
-        if v:
+        if v and is_path(r["method"]):
             best[:len(v)] = np.minimum(best[:len(v)], np.array(v, dtype=float))
+            used += 1
     theirs = {}
     for log in sorted(glob.glob(os.path.join(logdir, f"{mesh}_{kind}_*.log"))):
         txt = open(log).read()
@@ -50,9 +56,10 @@ if kind == "W2V":
             rel = np.array(v, dtype=float) / best[:len(v)] - 1
             r.update(err_mean=float(rel.mean() * 100), err_p90=float(np.percentile(rel, 90) * 100),
                      err_max=float(rel.max() * 100), err_min=float(rel.min() * 100))
-    ours["reference"] = "best path found by any method (no exact solver for weighted terrains)"
+    ours["reference"] = ("best path found by any method (no exact solver for weighted terrains); "
+                         "interpolated answers are scored but excluded from the reference")
     json.dump(ours, open(os.path.join(root, "results", f"{tag}.json"), "w"), indent=1)
-    print("reference = pointwise best over", len(ours["rows"]), "of our rows and", len(theirs), "of their logs")
+    print("reference = pointwise best over", used, "path-valued rows of ours and", len(theirs), "of their logs")
 elif kind == "V2V":
     for l in q:
         s = tr.query([float(l[0]), float(l[1]), float(l[2])])[1]; t = tr.query([float(l[4]), float(l[5]), float(l[6])])[1]

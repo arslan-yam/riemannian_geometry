@@ -3,17 +3,20 @@ neighbour offsets `ds`, edges weighted by Riemannian length, obstacle-aware edge
 import numpy as np
 from typing import List
 from ..manifolds import Manifold
-from ..obstacles import Obstacle, blocked
+from ..obstacles import Obstacle, blocked, segments_blocked
 
 ds = [(1, 0), (0, 1), (1, 1), (1, -1), (2, 1), (1, 2), (2, -1), (1, -2)]
 ts = [0.2, 0.4, 0.6, 0.8]
 
 def segment_free(manifold: Manifold, x, y, obstacles):
+    #obstacles exactly, the domain at the sample points ts
+    if obstacles and segments_blocked(np.asarray(x, dtype=float)[None], np.asarray(y, dtype=float)[None], obstacles)[0]:
+        return False
     for t in ts:
         q = (1.0 - t) * x + t * y
-        if not manifold.in_domain(q) or blocked(q, obstacles):
+        if not manifold.in_domain(q):
             return False
-    return True 
+    return True
 
 
 def sample_points_grid(manifold: Manifold, nx, ny, bounds, obstacles):

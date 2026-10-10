@@ -39,6 +39,7 @@ class TerrainMesh(Manifold):
         self.c = z[:, 0] - self.a * x[:, 0] - self.b * y[:, 0]
         self.w = np.ones(len(F)) if weights is None else np.asarray(weights, dtype=float)
         self.weighted = weights is not None and not np.allclose(self.w, 1.0)
+        self.lambda_min = float(self.w.min()) #|v|_g = w |Mv| >= w_min |v|
         self.xy = self.V[:, :2]
         self.bbox = (self.xy[:, 0].min(), self.xy[:, 0].max(), self.xy[:, 1].min(), self.xy[:, 1].max())
         self.vtree = cKDTree(self.xy)

@@ -113,6 +113,16 @@ why no amount of graph resolution reaches the accuracy targets, and why §5 exis
 Binary-heap Dijkstra on `adj`, optional early exit at a target, returning distance and predecessor
 arrays; `get_path(pred, s, t)` walks predecessors (returns `None` if unreachable). $O(|E|\log n)$.
 
+### 3.4 `cdijkstra.py`, `_cdijkstra.c` — multi-seed Dijkstra with early termination
+
+`multi_dijkstra(G, seeds, targets, limit)`: one search per source, a source being a set of (node,
+initial distance) seeds — a point inside a face is seeded at the face's boundary nodes, so no augmented
+graph is built. Binary heap with lazy deletion; a search stops when all of its targets are settled (or
+the open minimum exceeds `limit`), so distances equal a full Dijkstra's. Targets are shared by all
+sources or given per source. C via ctypes (`rgeo/_cbuild.py`), scipy fallback (virtual source nodes).
+On the weighted HorseMount Steiner graph ($m=5$, 12k nodes) a full search costs 5.1 ms (scipy 6.2 ms) and
+a search to the 200 nearest nodes 0.15 ms; the certified build drops from 40.9 s to 11.3 s.
+
 ### 3.3 `sampling.py` — adaptive node sets
 
 A **difficulty field** on a $\mathrm{res}\times\mathrm{res}$ grid,
@@ -195,10 +205,13 @@ cut, a set of **virtual portals on the cut line itself** with continuum labels. 
 **Step 1 — cut geometry** (`cut_arclength`). For cut $C$ with region interval $[r_{lo}, r_{hi}]$ (the
 box $B$ projected on the cut) the code samples the line, computes the metric speed along it,
 $\sigma(t) = \sqrt{g_{bb}}$ ($b$ the other axis), and its cumulative arc length. The **window**
-$W = [lo, hi]$ pads the region interval by a margin $\mu = \tfrac12 L(\mathrm{diag}\, B)$:
-* with `pad_speed` $= \lambda_{\min}$ (terrains: $\lambda_{\min}=1$): $W = [r_{lo} - \mu/\lambda_{\min},\, r_{hi} + \mu/\lambda_{\min}]$;
-* otherwise the arc length along the cut is inverted (a heuristic: a detour off the cut can be cheaper
-  than the cut itself).
+$W = [lo, hi]$ pads the region interval by a margin $\mu$ = the largest graph distance from a hub member
+(the one nearest the box centre) to the region's members (`hub_margin`, one scipy Dijkstra), an upper
+bound of $\tfrac12 \max d(s,t)$ over member pairs since $d(s,t) \le d(s,h) + d(h,t)$:
+* with `pad_speed` $= \lambda_{\min}$ (default: the manifold's `lambda_min` — 1 on terrains, 2 on the
+  Poincaré disk): $W = [r_{lo} - \mu/\lambda_{\min},\, r_{hi} + \mu/\lambda_{\min}]$, provable;
+* if the manifold has no known $\lambda_{\min}$ the arc length along the cut is inverted (a heuristic: a
+  detour off the cut can be cheaper than the cut itself).
 
 The padding lemma (notes/error_bound.md §2): if $s,t \in B$ are on opposite sides and the shortest path
 crosses the cut line at $x^\ast$ outside $B$ by coordinate offset $c$, then
@@ -213,8 +226,11 @@ from 1 at the region boundary to 0 at the end of the padding.
   region part (`scale_k=True`).
 * The window is split into **free runs** (maximal intervals outside obstacles and inside $U$) and each
   run into its in-region piece and its padded tails. The $k_C$ portals are shared between region pieces
-  in proportion to their placement measure and spaced equally in it; each tail gets `k_pad` (=1)
-  interior portals; optionally portals at the crossings with mesh edges (`edge_portals`, terrains).
+  in proportion to their placement measure and spaced equally in it. Tails are filled outward from the
+  region end with Riemannian arc gaps $\max(h_{in},\, 2\,\varepsilon_t \lambda_{\min} c)$ (`tail_eps` $=\varepsilon_t$, $c$ the
+  chart offset from the region, $h_{in}$ the in-region gap): the window lemma gives $d \ge 2\lambda_{\min} c$ for a
+  crossing at offset $c$, so a tail crossing is resolved to relative error $\varepsilon_t$ (`k_pad` portals only
+  when $\lambda_{\min}$ is unknown); optionally portals at the crossings with mesh edges (`edge_portals`).
 * Portals are sorted along the cut; `cut_seg` records the free run of each, because interpolation must
   never fit across an obstacle gap.
 
@@ -235,7 +251,9 @@ leaf's sub-mesh, which also returns the exact distance to every vertex within `h
 the leaf (`halo_ids`, `halo_d`): pairs a few edges apart on opposite sides of a cut are answered there.
 
 **Step 5 — feet.** For every member $u$ and cut, the foot $x_u$ (the chart projection on the line) and
-the drop $r_u = L(\overline{u\, x_u})$, one batched length call per cut.
+the drop $r_u = L(\overline{u\, x_u})$, one batched length call per cut (if the foot segment leaves the
+domain, $\lambda_{\min}$ times the chart drop). `cut_arc` stores the true Riemannian arc length along the cut,
+so the model interpolation works in metric units.
 
 **Query** (`query`, `cut_bound`, `portal_min`). With $C = \mathrm{lcs}(s,t)$ and
 $f_j = \ell(s, x_j) + \ell(t, x_j)$, $i = \arg\min_j f_j$:
@@ -258,6 +276,62 @@ batched refinement of $|R_C|$ polylines; exact, one MMP sweep on the sub-mesh of
 $= \sum_u \sum_{C \ni u} k_C$ float32 labels $+$ leaf tables $+$ halo $+$ one foot per (node, cut): with
 uniform $k$ and $O(\log n)$ depth, $O(n k \log n)$. Query: $O(1)$ for the LCS, $O(k_C)$ for the minimum,
 $O(1)$ for the interpolation (≈10 Newton steps in the model case): 3–30 µs measured.
+
+### 4.5 `certified.py` — the Certified Cut Index (terrains)
+
+`CertifiedCutIndex(tm, eps=0.1, gap=None, gap_factor=0.5, oracle=None, interpolate="model")` implements
+the theorem of `notes/guarantee.md` step by step. Parameters: $\varepsilon$, the portal gap $g$ (absolute, or
+`gap_factor` times the median chart edge length), $\lambda = \min_f w_f$ (1 when unweighted) and the near
+radius $R = g/(\varepsilon\lambda)$. Label source `oracle`: `ExactLabels` (MMP, unweighted) or
+`SteinerLabels` (§8.6, weighted). Phases, each timed in `self.timing`:
+
+1. **Tree** (`_tree`, `_split_value`). Regions are vertex sets; a region is a leaf when its chart bounding
+   box has diagonal $\le R$. Otherwise it is cut along the longer axis at a value strictly between the two
+   middle member coordinates and different from every vertex coordinate of the mesh (the midpoint of the
+   widest gap), so no vertex lies on a cut and both children are non-empty. `anc[u, k]` / `row[u, k]`
+   record the cut at depth $k$ above $u$ and $u$'s row in its label matrix.
+2. **Cut geometry** (`_cut_geometry`, `_line_pieces`, `_place`). Hub $h$ = the member nearest the box
+   centre; $\mu = \max_u d_G(h,u)$ (mesh-graph Dijkstra, edges charged at the cheaper adjacent face, so an
+   upper bound); window = the box interval $\pm \mu/\lambda$. `_line_pieces` intersects the line with the
+   faces the `FaceGrid` returns, exactly: each crossed face contributes a piece with speed
+   $w_f\sqrt{1+(\partial_b z)^2}$, pieces are grouped into **runs** (maximal intervals inside the mesh) with
+   exact cumulative arc length. `_place` puts portals at both ends of every run and of the box interval,
+   uniformly in arc with gap $\le g$ inside the box, and in the tails steps of $\max(g, 2\varepsilon\lambda c)$
+   ($c$ = chart offset of the step's near end).
+3. **Labels** (`_labels`). For each portal $x$ an upper bound $U_x \ge d(x,h)$ (straight face walk to the hub,
+   or walk to the nearest vertex plus its graph distance); with $D = \max_x U_x + \mu \ge d(x,u)$ for every
+   member $u$, the ellipse lemma puts every label geodesic within $D/(2\lambda)$ of the chord $[x,u]$, so the
+   faces meeting bbox(members ∪ portals) $\pm D/(2\lambda)$ form a sub-mesh on which distances are exact.
+   `oracle.cut` inserts the portals (§8.5) and runs one early-stopping sweep per portal; labels are
+   float32 rounded **up**. `_finalize_cut` recomputes arc positions and gaps from the positions actually
+   inserted (a portal within $10^{-7}$ of an edge is moved along the cut), drops portals without a finite
+   label, and records **end stretches** (a run end that is no longer a portal) for the lower bound.
+4. **Near tables** (`_near`). Per leaf: every vertex within chart distance $R(1+10^{-9})$ of each member
+   (k-d tree), exact distances from one sweep per member on the sub-mesh dilated by the largest graph
+   distance $/(2\lambda)$; CSR arrays `near_ptr`, `near_ids` (sorted), `near_d` (float32, rounded up).
+5. **Feet** (`_feet`) for the model interpolation: drop $r_u$ and arc position of the foot on each run.
+
+**Query** (`bounds(s, t)` → `(LB, UB, est)`). Near pair ($|s-t| \le R$): the stored distance $d$, LB
+$= d(1-2^{-22})$. Otherwise $C$ = the first differing ancestor (`_cut_of`), $f_j = \ell(s,p_j)+\ell(t,p_j)$
+(float64 sum of the float32 labels), UB $= \min_j f_j$, and with exact labels
+LB $= \max\big(\lambda|S-T|_{3D},\ (1-2^{-21})\min\{\tfrac12(f_j+f_{j+1}) - A_j,\ f_k - 2e_k\}\big)$ over consecutive
+portals of one run and over end stretches. `est` = the model / parabola interpolation of §4.3 around the
+argmin, clamped to $[\mathrm{LB}, \mathrm{UB}]$. `query` returns `est`, `query_ub` returns UB.
+**Guarantee:** $(1-\varepsilon)d \le \mathrm{LB} \le d \le \mathrm{UB} \le (1+\varepsilon)d$ for all vertex pairs with exact labels;
+with Steiner labels UB $\le (1+\eta)(1+\varepsilon)d$ and LB is the chord.
+
+**Cost.** Labels $= \sum_C |M_C|\,|P_C|$ float32 (about $3\bar\sigma D/g$ per vertex for a square domain of side
+$D$, plus tails), near tables $\approx \pi R^2\rho$ entries per vertex, build = one sweep per portal + one per
+vertex, query $O(\text{depth} + |P_C|)$. `nbytes()` counts every array the query reads.
+
+### 4.6 `cquery.py`, `_cquery.c` — the compiled query
+
+`CompiledQuery(ix)` concatenates the index into flat arrays (labels with per-cut offsets, gaps padded to
+one entry per portal, end stretches, near CSR, feet) behind one C struct; `bounds(s, t)` runs the same
+arithmetic as `CertifiedCutIndex.bounds` (compiled with `-ffp-contract=off`; tests check equality to
+$10^{-12}$, measured bit-identical bounds) in ~1.2 µs per call through ctypes, `bounds_batch(S, T)` in
+~0.25 µs per pair. The library is compiled on first use by `rgeo/_cbuild.py` (`$CC`, default `cc`) and
+cached next to the source under the source's hash; without a compiler `available()` is False.
 
 ### 4.4 `variants.py` — recorded negative results
 
@@ -405,6 +479,9 @@ cut line crosses mesh edges.
   $O(n \log n)$ sweeps-size instead of $O(n^2)$ (16× on HorseMount at k=64; verified identical labels).
 * `submesh`, `local_table`: the ring-based variant used before `region_geo`.
 * Weighted terrains are refused: MMP does not handle face weights.
+* The certified index does not use `region_geo`: its sub-meshes come from the ellipse lemma with hub upper
+  bounds (§4.5), which is tight on steep terrain where $\lambda_{\max}$ is large (Gunnison10k: max slope
+  14.9, the $\lambda_{\max}$ dilation swept the whole mesh at depths 2 and 5).
 
 ### 8.4 `a2a.py` — `TerrainA2A`, arbitrary surface points
 
@@ -420,6 +497,34 @@ For $p$ in face $f$ (barycentric weights $\beta$) and $q$ in face $f'$:
   vectors first and taking one portal minimum would be 9× cheaper but has a Jensen gap first order in the
   spread of the vertices' argmins (measured 0.8% vs 0.18%), so the minimum is taken per vertex pair.
 
+### 8.5 `submesh.py` — face grid, sub-meshes, batch insertion, early stopping
+
+* `FaceGrid(tm)`: uniform grid (cell = 2 median edges) over the chart, every face registered in every
+  cell its bounding box meets (CSR); `faces_in_box(x0, x1, y0, y1)` returns exactly the faces whose
+  bounding box meets the box (tested against brute force).
+* `extract(tm, faces)`: the sub-mesh in local numbering with the global ↔ local maps.
+* `insert_points(tm, V, F, faces, X, along)`: all points at once — a face receiving one point is split
+  1→3 (vectorised), a face receiving several is re-triangulated by Delaunay of its corners and points;
+  $z$ from the face plane, so the surface is unchanged (total area preserved to $10^{-12}$, distances
+  between original vertices unchanged); a point within $10^{-7}$ (barycentric) of an edge is moved by
+  $10^{-5}$ edge lengths along `along` (portals stay on their cut).
+* `ExactSolver(V, F).dist(src, targets)`: pygeodesic MMP with `max_distance=0`, which enables its
+  stop-at-targets test (the default infinite bound disables it): identical distances, 10–200× less work
+  for nearby targets.
+
+### 8.6 `steiner.py` — Steiner base graph for weighted terrains
+
+* `SteinerGraph(tm, m)`: $m$ equally spaced points on every edge; along each edge the chain
+  $A, s_1, \dots, s_m, B$ at the cheaper adjacent face cost; inside each face every pair of its $3+3m$
+  boundary points not on a common edge, cost $w_f \times$ 3-d length. Every graph path is a surface curve,
+  so distances are upper bounds of the weighted geodesic distance, converging as $m$ grows (the
+  weighted-region scheme of Aleksandrov–Maheshwari–Sack / Lanthier et al.). `face_points[f]` lists a
+  face's boundary nodes.
+* `SteinerLabels(tm, grid, m)`: the label source of §4.5 on weighted terrains (`exact = False`): `cut` seeds
+  each portal at its face's boundary points ($w_f \times$ straight distance) and runs `multi_dijkstra` on
+  the sub-graph of the label sub-mesh's faces; `near` the same from each member to its near targets.
+  Labels are float32 rounded up.
+
 ---------------------------------------------------------------------------------------------------
 
 ## 9. `bench/` — the benchmark
@@ -434,7 +539,11 @@ For $p$ in face $f$ (barycentric weights $\beta$) and $q$ in face $f'$:
    heavy refinement whose values are later replaced by the best path any method found;
 4. methods: Dijkstra, H2H, vertex portals, the cut index in several configurations (`exact` with a list of
    $k$, `exact_scaled`, `cut` = refined labels), each with no / parabola / model interpolation and the
-   two A2A modes;
+   two A2A modes; the certified index for every `--cert eps/gap_factor` (exact labels, or Steiner labels
+   for every `--steiner-m` on weighted terrains), rows `(UB)` and `(estimate)` with the compiled query's
+   latency (`query_us`), the Python one (`query_us_python`) and the batch cost (`query_us_batch`), the
+   certificate checked on every query (`certificate`: soundness, max UB error, UB/LB width), and an A2A
+   row; `--steiner-ref m` adds a plain Dijkstra on a fine Steiner graph as a weighted reference;
 5. `measure`: signed relative errors and the best of three timing loops per query set;
    `index_bytes`: label arrays + leaf tables + portal coordinates + feet + halo (H2H: 12 bytes per label
    entry). Rows are appended to `results/<mesh>.json` after every method, merged with earlier rows.
@@ -449,8 +558,10 @@ build time, `write_note` regenerates `notes/terrain_results.md` with its caveats
 
 * `make_terrains.py`: regenerates `data/terrains/` from the EAR-Oracle repository's datasets (repair,
   translation to the origin, the 10k and 1k crops of GunnisonForest, `--large` for the 100k meshes).
-* `run_scale.sh`, `run_weighted.sh`: the 100k and weighted experiments, ours then theirs; meant to run
-  detached (`nohup ... &`).
+* `run_certified.sh`: the final runs of the certified index (five meshes × three configs, weighted
+  HorseMount on Steiner labels with the re-scoring of the competitors' logs, the 100k mesh).
+* `run_scale.sh`, `run_weighted.sh`: the 100k and weighted experiments of the earlier index, ours then
+  theirs; meant to run detached (`nohup ... &`).
 * `competitors/`: `README.md` (macOS/CGAL-6 patches of their harness, the float32 and point-location
   pitfalls), `run_competitors.sh` (runs `method[@eps[@sp]]` on a query file; `KIND`, `FACE_WEIGHTS`),
   `competitor_eval.py` (scores their logs against the same truth; on weighted terrains it builds the
@@ -468,30 +579,33 @@ build time, `write_note` regenerates `notes/terrain_results.md` with its caveats
 * `tests/test_core.py` — invariants: H2H equals Dijkstra; the cut index without interpolation is an upper
   bound and beats the graph; the exact walk reproduces mesh edges; walk gradients match finite
   differences; exact labels match MMP; weighted terrains refuse exact labels; refinement avoids
-  obstacles.
+  obstacles; the exact segment-obstacle test contains dense sampling; `FaceGrid` matches brute force;
+  inserted points leave area and distances unchanged; certified bounds hold and are within $\varepsilon$ on 159
+  random pairs; the compiled query equals the Python query; Steiner labels stay above exact distances.
 * `results/` — see §9; `results/logs/` (gitignored) holds the run logs.
 * `notes/` — this file, the error bound, the preprocessing account, the generated benchmark tables.
 
 ---------------------------------------------------------------------------------------------------
 
-## 12. Gaps found while writing this walk-through
+## 12. Gaps found while writing this walk-through — status: fixed
 
-These do not change any reported number by much, but a paper's proofs need them fixed.
+1. **Padding margin** — fixed. `hub_margin` takes $\mu$ = the largest graph distance from a hub member
+   to the region (an upper bound of half of every member-pair distance), and `pad_speed` defaults to the
+   manifold's `lambda_min`, so the window is provable on every manifold that declares it.
+2. **Tail resolution** — fixed. Tails are filled with arc gaps $\max(h_{in}, 2\varepsilon_t\lambda_{\min} c)$; a crossing in a
+   tail is resolved to relative error $\varepsilon_t$ by the window lemma (proof in `notes/guarantee.md`, Lemma 4,
+   which the certified index uses verbatim).
+3. **Model-interpolation units** — fixed. `cut_arc` is the Riemannian arc length along the cut; the raw
+   placement measure is kept separately (`_raw_arc`) for placement only.
+4. **Admissibility of refined labels** — fixed for obstacles: `segments_blocked` tests circles and
+   rectangles exactly (closest point / Liang–Barsky), used by `free_segment`, `free_polyline`, `shortcut`
+   and the graph builder; equal to 4,001-sample dense tests on 20,000 random segments. The domain test
+   is still sampled (it is a disc or a box in every manifold here, where sampling at `step` is exact up to
+   the boundary's curvature).
+5. **The endpoint-near-a-cut gap** (no bound when $s$ or $t$ is close to the cut) — solved by the
+   certified index (§4.5): pairs within $R = g/(\varepsilon\lambda)$ are in the exact near tables, every other pair has
+   $d > g/\varepsilon$, and the interval certificate holds for all pairs.
 
-1. **Padding margin.** `cut_arclength` uses $\mu = \tfrac12 L(\mathrm{diag}\,B)$, the length of one chart
-   segment, as a stand-in for $\tfrac12\mathrm{diam}_g(B)$. The lemma needs an *upper* bound of
-   $d(s,t)$ over member pairs, e.g. $\tfrac12 \lambda_{\max}(B)\,|\mathrm{diag}\,B|$ as `region_geo` already
-   uses. On terrains the two differ by the slope variation inside $B$.
-2. **Tail resolution.** Each padded tail gets `k_pad = 1` portal, so for a crossing in a tail the portal gap
-   in the bound is the tail length. The window makes the crossing *covered*, not *well resolved*;
-   empirically such crossings are rare.
-3. **Model-interpolation units.** `_model_min` scales cut offsets by the slope of the placement measure
-   (`cut_arc`), which for $\alpha = 0$ is 1 inside the region — chart units, not the metric speed
-   $\sigma$ the comment describes. Harmless on terrains (the fitted remainder absorbs it), worth fixing to
-   the true arc length for strongly anisotropic metrics.
-4. **Admissibility of refined labels** holds at the sampling resolution `step` of the free-space test and
-   up to Gauss–Legendre error on analytic metrics (§5.2). Exact on terrains.
-
-Minor: `foot_r` falls back to a drop of 0 when the foot segment leaves the domain (the model then sees a
-cone); interpolated answers are two-sided by design; for two nodes in the same leaf `lcs` returns the
-leaf's parent cut, which still gives an admissible portal answer, but the leaf table is what answers them.
+Minor items, also fixed: `foot_r` falls back to $\lambda_{\min}$ times the chart drop instead of 0; exact sweeps
+use `max_distance=0` (identical answers, early termination). Still by design: interpolated answers are
+two-sided; in the certified index they are clamped into the certified interval.

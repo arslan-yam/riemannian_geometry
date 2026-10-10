@@ -25,6 +25,20 @@ class Obstacle(ABC):
         raise NotImplementedError(f"{type(self).__name__} needs clearance_batch for path refinement")
     
     
+def segments_blocked(A, B, obstacles):
+    #exact: does the chart segment A[i] -> B[i] meet the interior of any obstacle
+    A = np.atleast_2d(np.asarray(A, dtype=float)); B = np.atleast_2d(np.asarray(B, dtype=float))
+    hit = np.zeros(len(A), dtype=bool)
+    for o in obstacles:
+        if hasattr(o, "segments_blocked"):
+            hit |= o.segments_blocked(A, B)
+        else: #unknown obstacle type: dense sampling fallback
+            t = np.linspace(0.0, 1.0, 65)
+            for tt in t:
+                hit |= o.blocked_batch(A + tt * (B - A))
+    return hit
+
+
 class Circle(Obstacle):
     def __init__(self, cx, cy, r):
         self.cx, self.cy, self.r = cx, cy, r
@@ -36,6 +50,15 @@ class Circle(Obstacle):
 
     def blocked_batch(self, points):
         return (points[:, 0] - self.cx) ** 2 + (points[:, 1] - self.cy) ** 2 < self.r * self.r
+
+    def segments_blocked(self, A, B):
+        #the segment meets the open disk iff its closest point to the centre is inside
+        c = np.array([self.cx, self.cy])
+        d = B - A
+        L2 = np.maximum((d * d).sum(1), 1e-300)
+        t = np.clip(((c - A) * d).sum(1) / L2, 0.0, 1.0)
+        q = A + t[:, None] * d - c
+        return (q * q).sum(1) < self.r * self.r
 
     def clearance_batch(self, points):
         v = points - np.array([self.cx, self.cy])
@@ -54,6 +77,22 @@ class Rectangle(Obstacle):
     def blocked_batch(self, points):
         x, y = points[:, 0], points[:, 1]
         return (self.sx <= x) & (x <= self.ex) & (self.sy <= y) & (y <= self.ey)
+
+    def segments_blocked(self, A, B):
+        #liang-barsky clipping against the closed box [sx,ex] x [sy,ey]; touching counts as blocked,
+        #consistent with `blocked`, which is closed for rectangles
+        d = B - A
+        t0 = np.zeros(len(A)); t1 = np.ones(len(A))
+        ok = np.ones(len(A), dtype=bool)
+        for p, q in ((-d[:, 0], A[:, 0] - self.sx), (d[:, 0], self.ex - A[:, 0]),
+                     (-d[:, 1], A[:, 1] - self.sy), (d[:, 1], self.ey - A[:, 1])):
+            par = p == 0
+            ok &= ~(par & (q < 0))
+            with np.errstate(divide="ignore", invalid="ignore"):
+                r = q / p
+            t0 = np.where(~par & (p < 0), np.maximum(t0, r), t0)
+            t1 = np.where(~par & (p > 0), np.minimum(t1, r), t1)
+        return ok & (t0 <= t1)
 
     def clearance_batch(self, points):
         x, y = points[:, 0], points[:, 1]

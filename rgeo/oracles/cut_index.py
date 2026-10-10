@@ -67,7 +67,7 @@ class SeparatorCutIndex(SeparatorIndex):
             tgt = np.concatenate([loc, remap[extra]]) if len(extra) else loc
             H = np.full((m, len(extra)), np.inf)
             for i, vi in enumerate(loc):
-                d, _ = geo.geodesicDistances(np.array([int(vi)]), tgt)
+                d, _ = geo.geodesicDistances(np.array([int(vi)]), tgt, max_distance=0.0)
                 D[i] = d[:m]
                 H[i] = d[m:]
             D = np.minimum(D, D.T)
@@ -164,7 +164,7 @@ class SeparatorCutIndex(SeparatorIndex):
                  max_depth=32, halo=1, rounds=2, use_relax=True, segments=20, interpolate=True,
                  alpha=0.0, scale_k=True, k_min=4, k_max=None, pad="diam", k_pad=1, workers=1, batched=True,
                  pad_speed=None, exact=None, exact_rings=3, halo_rings=2, label_dtype=np.float32,
-                 edge_portals=0):
+                 edge_portals=0, tail_eps=0.1):
         self.manifold = manifold
         self.obstacles = list(obstacles)
         self.rounds = rounds
@@ -186,7 +186,10 @@ class SeparatorCutIndex(SeparatorIndex):
         #geometry makes looping round a cut end plausible
         self.pad = pad
         self.k_pad = k_pad #portals per padded tail, on top of the region budget
-        self.pad_speed = pad_speed #lambda_min of the metric: makes the "diam" window a proof, not a heuristic
+        #lambda_min of the metric makes the "diam" window a proof, not a heuristic; default to the
+        #manifold's own bound when it has one
+        self.pad_speed = pad_speed if pad_speed is not None else getattr(manifold, "lambda_min", None)
+        self.tail_eps = tail_eps #tail portals spaced max(h, 2 tail_eps lambda_min c): gap 2
         #exact labels when the manifold has an exact point-to-all solver (terrain.ExactTerrain):
         #then no graph path is refined at all, labels and leaf tables are exact geodesics
         self.exact = exact
@@ -205,6 +208,25 @@ class SeparatorCutIndex(SeparatorIndex):
                     self.points[:, 1].min(), self.points[:, 1].max())
         self.tree = cKDTree(self.points)
         self.build_cut_labels()
+
+    def _graph_csr(self):
+        if getattr(self, "_csr", None) is None:
+            from scipy.sparse import csr_matrix
+            r = [u for u in range(self.n) for _ in self.adj[u]]
+            c = [v for u in range(self.n) for v in self.adj[u]]
+            w = [x for u in range(self.n) for x in self.adj[u].values()]
+            self._csr = csr_matrix((w, (r, c)), shape=(self.n, self.n))
+        return self._csr
+
+    def hub_margin(self, sep_id):
+        from scipy.sparse.csgraph import dijkstra as sp_dijkstra
+        members = np.asarray(self.sep_points[sep_id], dtype=int)
+        x0, x1, y0, y1 = self.sep_bbox[sep_id]
+        ctr = np.array([0.5 * (x0 + x1), 0.5 * (y0 + y1)])
+        hub = int(members[np.argmin(np.linalg.norm(self.points[members] - ctr, axis=1))])
+        d = sp_dijkstra(self._graph_csr(), indices=hub)[members]
+        d = d[np.isfinite(d)] #members unreachable from the hub cannot pair with it through the cut
+        return float(d.max()) if len(d) else 0.0
 
     def cut_arclength(self, sep_id, samples=200):
         #parameterise the cut by riemannian arc length. the same coordinate spacing can be
@@ -235,9 +257,11 @@ class SeparatorCutIndex(SeparatorIndex):
         arc_rhi = float(np.interp(rhi, probe, raw_arc))
 
         if self.pad in ("diam", "domain"):
-            #riemannian length of the bbox diagonal, via the same quadrature used everywhere
-            #else in the codebase for continuum lengths -- NOT np.hypot, which is coordinate-only
-            margin = 0.5 * self.manifold.segment_lenght(np.array([x0, y0]), np.array([x1, y1]))
+            #mu >= half of every member-pair distance: d(s,t) <= d(s,h) + d(h,t) <= 2 max_u d(h,u)
+            #for a hub member h, with d(h,u) bounded by the graph distance (graph paths are free
+            #curves). the old margin, half the length of the box diagonal, was neither an upper
+            #nor a lower bound of the region's diameter (gap 1 of notes/code_walkthrough.md)
+            margin = self.hub_margin(sep_id)
         else:
             margin = 1e-12
         if self.pad == "diam" and self.pad_speed is not None:
@@ -280,6 +304,7 @@ class SeparatorCutIndex(SeparatorIndex):
         #diluted every interior budget (measured: +35% error on poincare, same max)
         inside = (dense >= rlo) & (dense <= rhi)
         region_speed = np.where(inside, speed, 0.0)
+        self._raw_arc[sep_id] = (dense, raw, margin)
         return dense, arc, region_speed, inside
 
     def build_cut_labels(self):
@@ -288,6 +313,7 @@ class SeparatorCutIndex(SeparatorIndex):
         self.cut_xy = []
         self.cut_label = [dict() for _ in range(self.n)]
 
+        self._raw_arc = {}
         geom = [self.cut_arclength(i) for i in range(len(self.sep_points))]
         #scale_k must use TRUE arc length, not the alpha weighted measure, or the budget
         #allocation across separators would change with alpha
@@ -354,15 +380,36 @@ class SeparatorCutIndex(SeparatorIndex):
                     for v in np.interp(np.linspace(0.0, a[-1], nr), a, d):
                         pos.append(float(v))
                         seg.append(r)
+            _, raw, _ = self._raw_arc[sep_id]
+            rlo_c, rhi_c = (self.sep_bbox[sep_id][2], self.sep_bbox[sep_id][3]) if axis == 0 else (self.sep_bbox[sep_id][0], self.sep_bbox[sep_id][1])
+            region_arc = sum(raw[i1] - raw[i0] for _, i0, i1, _ in region)
+            h_in = region_arc / max(kk, 1) #portal gap inside the region (riemannian arc)
             for r, i0, i1, _ in tails:
-                a = arc[i0:i1 + 1] - arc[i0]
                 d = dense[i0:i1 + 1]
-                if a[-1] <= 0:
+                ra = raw[i0:i1 + 1]
+                if ra[-1] - ra[0] <= 0:
                     continue
-                #interior points of the tail only; its region-side end is already a portal
-                for v in np.interp(np.linspace(0.0, a[-1], self.k_pad + 2)[1:-1], a, d):
-                    pos.append(float(v))
-                    seg.append(r)
+                if self.pad_speed is None or not self.tail_eps:
+                    a = arc[i0:i1 + 1] - arc[i0] #old rule: k_pad interior points per tail
+                    for v in np.interp(np.linspace(0.0, a[-1], self.k_pad + 2)[1:-1], a, d):
+                        pos.append(float(v)); seg.append(r)
+                    continue
+                #a crossing at chart offset c beyond the region needs d(s,t) >= 2 lambda_min c, so a
+                #gap of max(h_in, 2 eps lambda_min c) keeps the portal error below eps d(s,t)
+                left = d[-1] <= rlo_c + 1e-12
+                cur = d[-1] if left else d[0]
+                pos.append(float(cur)); seg.append(r) #region-side end (deduplicated below)
+                k2 = 2.0 * self.tail_eps * self.pad_speed
+                while True:
+                    c = (rlo_c - cur) if left else (cur - rhi_c)
+                    step = max(h_in, k2 * max(c, 0.0))
+                    a_cur = float(np.interp(cur, d, ra))
+                    a_nxt = a_cur - step if left else a_cur + step
+                    if (left and a_nxt <= ra[0]) or (not left and a_nxt >= ra[-1]):
+                        pos.append(float(d[0] if left else d[-1])); seg.append(r)
+                        break
+                    cur = float(np.interp(a_nxt, ra, d))
+                    pos.append(cur); seg.append(r)
             if self.edge_portals and hasattr(self.manifold, "edge_crossings"):
                 cross = self.manifold.edge_crossings(axis, sv, dense[0], dense[-1])
                 if len(cross) > self.edge_portals: #keep a uniform subset
@@ -376,6 +423,10 @@ class SeparatorCutIndex(SeparatorIndex):
             order = np.argsort(pos) #cut_bound fits a parabola over neighbours, keep them sorted
             pos = np.array(pos)[order]
             seg = [seg[i] for i in order]
+            if len(pos) > 1: #drop coincident portals (zero gaps would break the interpolation)
+                keep = np.r_[True, np.diff(pos) > 1e-9 * max(1.0, float(np.ptp(dense)))]
+                pos = pos[keep]
+                seg = [g for g, k in zip(seg, keep) if k]
             xy = np.zeros((len(pos), 2))
             xy[:, axis] = sv
             xy[:, 1 - axis] = pos
@@ -387,7 +438,9 @@ class SeparatorCutIndex(SeparatorIndex):
 
         #geometry needed by the model interpolation: the cut's arc length, and for every member
         #its foot on the cut line and the riemannian length of the drop (one batched walk per cut)
-        self.cut_arc = [(d, a) for d, a, _, _ in geom]
+        #the model interpolation needs RIEMANNIAN arc length along the cut, not the placement
+        #measure (gap 3 of notes/code_walkthrough.md: for alpha = 0 that measure is chart length)
+        self.cut_arc = [(self._raw_arc[i][0], self._raw_arc[i][1]) for i in range(len(geom))]
         self.foot_r = [dict() for _ in range(self.n)]
         for sep_id, members in enumerate(self.sep_points):
             if not members:
@@ -397,7 +450,8 @@ class SeparatorCutIndex(SeparatorIndex):
             Q = P.copy(); Q[:, axis] = sv
             r = segment_lengths(self.manifold, P, Q)
             for s, rv in zip(members, r):
-                self.foot_r[s][sep_id] = float(rv) if np.isfinite(rv) else float(np.hypot(*(P[0] * 0)))
+                lam = self.pad_speed if self.pad_speed else 1.0
+                self.foot_r[s][sep_id] = float(rv) if np.isfinite(rv) else float(lam * abs(self.points[s][axis] - sv))
         #everything above is cheap placement. the refinement below is all of the cost, and the
         #separators are independent, so fan them out across processes when asked to
         import time
@@ -442,7 +496,7 @@ class SeparatorCutIndex(SeparatorIndex):
         for j, vi in enumerate(pidx):
             if vi < 0: #portal outside the surface
                 continue
-            d, _ = geo.geodesicDistances(np.array([int(vi)]), tgt)
+            d, _ = geo.geodesicDistances(np.array([int(vi)]), tgt, max_distance=0.0) #stop at the members
             cols[j] = {int(s): float(v) for s, v in zip(members, d)}
         return cols
 

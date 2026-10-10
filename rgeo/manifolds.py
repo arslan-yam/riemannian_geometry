@@ -35,6 +35,10 @@ def build_metric_grad(fx, fy, fxx, fxy, fyy):
 
 
 class Manifold:
+    #a global lower bound of the metric speed, |v|_g >= lambda_min |v|. it turns the padding of
+    #a separator window into a proof (notes/error_bound.md); None means "unknown"
+    lambda_min = None
+
     def metric(self, p):
         raise NotImplementedError
 
@@ -120,6 +124,8 @@ class Manifold:
         return sum(self.segment_lenght(points[i], points[i + 1]) for i in range(len(points) - 1))
 
 class Euclidean(Manifold):
+    lambda_min = 1.0
+
     def metric(self, p):
         return np.eye(2)
 
@@ -130,6 +136,8 @@ class Euclidean(Manifold):
         return float(np.sqrt((q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2))
     
 class PoincareDisk(Manifold):
+    lambda_min = 2.0 #lambda = 2/(1-|p|^2) >= 2, equality at the origin
+
     def __init__(self, rmax=0.95):
         self.rmax = rmax
         
@@ -175,6 +183,8 @@ class PoincareDisk(Manifold):
     
 
 class Terrain(Manifold):
+    lambda_min = 1.0 #I + grad f grad f^T has smallest eigenvalue 1
+
     def __init__(self, amp=0.9, freq=1.4):
         self.amp = amp
         self.freq = freq
@@ -209,6 +219,8 @@ class Terrain(Manifold):
 
 
 class GaussianHills(Manifold):
+    lambda_min = 1.0
+
     def __init__(self, hills):
         self.hills = hills
 

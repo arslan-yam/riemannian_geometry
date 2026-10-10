@@ -233,3 +233,4 @@ __marimo__/
 data/terrains/large/
 results/logs/
 notebooks/_tmp*.ipynb
+external/

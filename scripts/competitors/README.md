@@ -18,6 +18,18 @@ The harness targets Linux/CGAL 5. Patches needed (all mechanical):
 5. CGAL 6: `boost::optional` -> `std::optional`, `boost::get<Point>(&x)` -> `std::get_if<Point>(&x)` in `base.h`.
 
 Then `cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-I$PWD/../shim" && make` in `bld/`.
+`harness.patch` in this folder is the complete diff (`git apply` it in a fresh clone at 2343aa9); the clone
+used for the results lives in the gitignored `external/weighted_distance_oracle`.
+
+6. **Weighted endpoint fix** (part of `harness.patch`, marked `[patch]`). Every weighted query routine
+   (`kSkip::queryGraphA2A` for the fixed scheme, `kSkip::unfixedOnTheFly`, and EAR-Oracle's query in
+   `quad.h`) joins the query point to the Steiner points of its face at plain Euclidean length, i.e. at
+   weight 1 instead of the face's weight $w_f \in (1, 5)$. Their weighted answers were therefore below
+   every weighted path on some queries (on weighted HorseMount, query 72: 212.9 m = the unweighted
+   geodesic, while the straight segment through faces of weight ~4 costs 664 m), and as part of a
+   best-path reference they dragged it down for every other method. The patch charges these segments
+   $w_f \times$ length (`Base::qw(fid)`), which only makes their answers valid path costs. Unweighted runs
+   (all weights 1) are unaffected.
 
 ## Two things that make or break the comparison
 

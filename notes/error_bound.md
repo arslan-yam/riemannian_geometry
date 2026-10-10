@@ -1,5 +1,10 @@
 # A global error bound for the Separator Cut Index
 
+> This note is about the earlier, uncertified `SeparatorCutIndex` on general manifolds. The terrain
+> oracle with a proved $(1+\varepsilon)$ guarantee and per-query certificates is the Certified Cut Index;
+> its theorem and proofs are in `notes/guarantee.md` (the window lemma of §2 here is its Lemma 2, and
+> the tail spacing that resolves crossings outside the box is its gap rule (2)).
+
 Everything the index returns is the length of an admissible curve, so the query is an
 upper bound on the true distance. This note bounds how far above it can be, and ties the
 bound to the three knobs of the construction: the portal spacing $h$, the label

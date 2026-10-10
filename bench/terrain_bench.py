@@ -12,6 +12,10 @@ from rgeo.terrain import TerrainMesh, read_off, repair_height_field, ExactTerrai
 from rgeo.graphs import dijkstra, get_path
 from rgeo.oracles import H2HIndex, SeparatorIndex, SeparatorCutIndex
 from rgeo.refine import refine_polyline
+from rgeo.oracles.certified import CertifiedCutIndex
+from rgeo.oracles import cquery
+from rgeo.terrain.submesh import FaceGrid
+from rgeo.terrain.steiner import SteinerGraph, SteinerLabels
 
 
 def vertex_queries(V, F, n_queries, seed=0):
@@ -139,7 +143,8 @@ def measure(query, qp, truth, repeat=3, keep_values=False):
 
 def run(mesh_path, n_queries=100, k=32, workers=1, seed=0, out_dir=None, slow_queries=30,
         segments=20, rounds=2, leaf_size=16, methods=("dijkstra", "h2h", "portals", "exact", "cut", "refine"),
-        k_list=None, halo_rings=2, n_a2a=0, a2a_near=4, weighted=None):
+        k_list=None, halo_rings=2, n_a2a=0, a2a_near=4, weighted=None, cert=(), steiner_m=(5, 10),
+        steiner_ref=0):
     k_list = list(k_list) if k_list else [k]
     name = os.path.splitext(os.path.basename(mesh_path))[0]
     V, F = read_off(mesh_path)
@@ -199,7 +204,8 @@ def run(mesh_path, n_queries=100, k=32, workers=1, seed=0, out_dir=None, slow_qu
 
     def add(label, build, size, m):
         rows.append(dict(method=label, build_s=build, index_bytes=size, **m))
-        print(f"  {label:34s} build {build:8.1f}s  size {size / 1e6:7.2f} MB  query {m['query_us']:9.1f} us  "
+        extra = f" (python {m['query_us_python']:.1f} us, batch {m['query_us_batch']:.2f} us)" if "query_us_python" in m else ""
+        print(f"  {label:34s} build {build:8.1f}s  size {size / 1e6:7.2f} MB  query {m['query_us']:9.1f} us{extra}  "
               f"err mean {m['err_mean']:.3f}%  p90 {m['err_p90']:.3f}%  max {m['err_max']:.3f}%  min {m['err_min']:.3f}%", flush=True)
         save()
 
@@ -240,6 +246,66 @@ def run(mesh_path, n_queries=100, k=32, workers=1, seed=0, out_dir=None, slow_qu
                 a2a = TerrainA2A(tm, cut, mode=mode, near=a2a_near)
                 m = measure_a2a(a2a.query, qa, truth_a)
                 add(label + f" + model interp, A2A {mode}", tb, index_bytes(cut), m)
+    if steiner_ref and weights is not None: #a strong reference for weighted terrains: fine Steiner graph
+        t0 = time.perf_counter()
+        sg = SteinerGraph(tm, steiner_ref)
+        from scipy.sparse.csgraph import dijkstra as sp_dijkstra
+        src = np.unique([s for s, _ in qp])
+        D = sp_dijkstra(sg.G, indices=src)
+        pos = {int(v): i for i, v in enumerate(src)}
+        vals = [float(D[pos[s], t]) for s, t in qp]
+        dt = (time.perf_counter() - t0) / len(qp)
+        errs = np.array(vals) / np.array([truth[q] for q in qp]) - 1
+        add(f"Steiner graph m={steiner_ref} Dijkstra (no index)", 0.0, 0,
+            dict(query_us=dt * 1e6, err_mean=float(errs.mean() * 100), err_max=float(errs.max() * 100),
+                 err_min=float(errs.min() * 100), err_p90=float(np.percentile(errs, 90) * 100), values=vals))
+        del sg, D
+    for spec in cert:
+        eps, gf = (float(x) for x in spec.split("/"))
+        oracles = [("exact MMP", None)] if weights is None else [(f"Steiner m={m}", m) for m in steiner_m]
+        for oname, mm in oracles:
+            t0 = time.perf_counter()
+            if mm is None:
+                ix = CertifiedCutIndex(tm, eps=eps, gap_factor=gf)
+            else:
+                ix = CertifiedCutIndex(tm, eps=eps, gap_factor=gf, oracle=SteinerLabels(tm, FaceGrid(tm), m=mm))
+            tb = time.perf_counter() - t0
+            st = ix.stats()
+            print(f"    build breakdown: {', '.join(f'{a} {b:.1f}s' for a, b in ix.timing.items())}; "
+                  f"{st['cuts']} cuts, {st['portals']} portals, {st['near_entries'] / n:.0f} near entries per node", flush=True)
+            label = f"certified eps={eps:g} g={gf:g}e, {oname}"
+            size = ix.nbytes()
+            cq = cquery.CompiledQuery(ix) if cquery.available() else None
+            def timed(row_fn, c_fn, ix=ix, cq=cq, st=st):
+                m = measure(row_fn, qp, truth, keep_values=keep)
+                if cq is not None: #same answers from the compiled query (tests check it); its latency
+                    m["query_us_python"] = m["query_us"]
+                    m["query_us"] = measure(c_fn, qp, truth)["query_us"]
+                    S = np.array([a for a, _ in qp]); T = np.array([b for _, b in qp])
+                    t0 = time.perf_counter()
+                    for _ in range(20):
+                        cq.bounds_batch(S, T)
+                    m["query_us_batch"] = (time.perf_counter() - t0) / (20 * len(qp)) * 1e6
+                m["stats"] = st; m["timing"] = ix.timing
+                return m
+            add(label + " (UB)", tb, size, timed(ix.query_ub, cq.query_ub if cq else None))
+            add(label + " (estimate)", tb, size, timed(ix.query, cq.query if cq else None))
+            if weights is None: #check the certificate on every query
+                B = np.array([ix.bounds(s, t) for s, t in qp]); tr = np.array([truth[q] for q in qp])
+                w = (B[:, 1] - B[:, 0]) / B[:, 0]
+                rows[-1]["certificate"] = dict(sound=bool(np.all(B[:, 0] <= tr) and np.all(B[:, 1] >= tr)),
+                                               max_ub_err=float((B[:, 1] / tr - 1).max() * 100),
+                                               min_lb_ratio=float((B[:, 0] / tr).min()),
+                                               width_median=float(np.median(w) * 100), width_max=float(w.max() * 100),
+                                               eps=eps, stats=st, timing=ix.timing)
+                print(f"    certificate: sound {rows[-1]['certificate']['sound']}, max UB error "
+                      f"{rows[-1]['certificate']['max_ub_err']:.3f}% (eps {eps * 100:g}%), width median "
+                      f"{rows[-1]['certificate']['width_median']:.3f}% max {rows[-1]['certificate']['width_max']:.3f}%", flush=True)
+                save()
+            if qa and mm is None: #vertex-pair answers from the compiled query when there is one (same values)
+                a2a = TerrainA2A(tm, cq if cq is not None else ix, mode="interp", near=a2a_near)
+                add(label + ", A2A interp", tb, size, measure_a2a(a2a.query, qa, truth_a))
+            del ix
     if "refine" in methods:
         sub = qp[:slow_queries]
         def q(s, t):
@@ -272,8 +338,12 @@ if __name__ == "__main__":
     ap.add_argument("--methods", default="dijkstra,h2h,portals,exact,exact_scaled")
     ap.add_argument("--k-list", default="", help="comma separated k values for the exact index (default: --k)")
     ap.add_argument("--halo-rings", type=int, default=2)
+    ap.add_argument("--cert", default="", help="certified index configs eps/gap_factor, comma separated, e.g. 0.1/0.5,0.05/0.25")
+    ap.add_argument("--steiner-m", default="5,10", help="Steiner points per edge for weighted labels")
+    ap.add_argument("--steiner-ref", type=int, default=0, help="weighted: add a Dijkstra reference on a Steiner graph with this many points per edge")
     a = ap.parse_args()
     run(a.mesh, a.queries, a.k, a.workers, out_dir=a.out, segments=a.segments, rounds=a.rounds,
         leaf_size=a.leaf_size, methods=tuple(a.methods.split(",")),
         k_list=[int(x) for x in a.k_list.split(",") if x], halo_rings=a.halo_rings, n_a2a=a.a2a, a2a_near=a.a2a_near,
-        weighted=a.weighted)
+        weighted=a.weighted, cert=[c for c in a.cert.split(",") if c],
+        steiner_m=[int(x) for x in a.steiner_m.split(",") if x], steiner_ref=a.steiner_ref)

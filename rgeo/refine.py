@@ -2,7 +2,7 @@
 obstacle barrier; and the batched variant that relaxes many polylines in one optimiser call."""
 import numpy as np
 from scipy.optimize import minimize
-from .obstacles import Circle, Rectangle
+from .obstacles import Circle, Rectangle, segments_blocked
 from .manifolds import gauss_legendre
 
 
@@ -125,9 +125,13 @@ def _free_points(manifold, pts, obstacles):
 
 
 def free_segment(manifold, a, b, obstacles, step):
+    #obstacles are tested exactly (gap 4 of notes/code_walkthrough.md); the domain, which can be any
+    #set, is still sampled at `step`
+    if obstacles and segments_blocked(np.asarray(a, dtype=float)[None], np.asarray(b, dtype=float)[None], obstacles)[0]:
+        return False
     m = max(4, int(np.ceil(np.linalg.norm(b - a) / step)))
     t = np.linspace(0.0, 1.0, m + 1)[:, None]
-    return _free_points(manifold, (1.0 - t) * a + t * b, obstacles)
+    return _free_points(manifold, (1.0 - t) * a + t * b, (), )
 
 
 def segment_lengths(manifold, A, B, n=4):
@@ -152,10 +156,13 @@ def polyline_lenght(manifold, coords, n=4):
 
 
 def free_polyline(manifold, coords, obstacles, step):
-    #sample every segment, then one batched free-space test over all samples
+    #exact segment-obstacle tests, then one batched sampled domain test over all segments
     coords = np.asarray(coords, dtype=float)
     if len(coords) < 2:
         return True
+    if obstacles and segments_blocked(coords[:-1], coords[1:], obstacles).any():
+        return False
+    obstacles = ()
     delta = coords[1:] - coords[:-1]
     counts = np.maximum(4, np.ceil(np.linalg.norm(delta, axis=1) / step).astype(int))
     pieces = []
@@ -194,9 +201,9 @@ def shortcut(manifold, coords, obstacles, step, window=30):
         pts = A[owner] + t[:, None] * (B - A)[owner]
         ok = manifold.in_domain_batch(pts) if hasattr(manifold, "in_domain_batch") \
             else np.array([manifold.in_domain(q) for q in pts], dtype=bool)
-        for o in obstacles:
-            ok &= ~o.blocked_batch(pts)
         bad = np.bincount(owner, weights=~ok, minlength=len(cand)) > 0
+        if obstacles:
+            bad |= segments_blocked(A, B, obstacles)
         for c, b in zip(cand, bad):
             if not b:
                 usable.setdefault(int(I[c]), set()).add(int(J[c]))

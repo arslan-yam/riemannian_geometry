@@ -1,0 +1,629 @@
+diff --git a/base.h b/base.h
+index 44d2d32..9020df0 100644
+--- a/base.h
++++ b/base.h
+@@ -4,6 +4,7 @@
+ //#define PrintDetails
+ 
+ #include <bits/stdc++.h>
++#include <mach/mach.h>
+ #include "chrono"
+ #include "assert.h"
+ #include <random>
+@@ -60,7 +61,7 @@ namespace Base {
+     using AABB_face_graph_traits = CGAL::AABB_traits<Kernel, AABB_face_graph_primitive>;
+     using AABB_tree = CGAL::AABB_tree<AABB_face_graph_traits>;
+ 
+-    typedef boost::optional<AABB_tree::Intersection_and_primitive_id<Ray>::Type> Ray_intersection;
++    typedef std::optional<AABB_tree::Intersection_and_primitive_id<Ray>::Type> Ray_intersection;
+ 
+ 
+     const float eps = 1e-5;
+@@ -70,30 +71,17 @@ namespace Base {
+     vector<pair<Point, Point> > A2A_query;
+     vector<pair<unsigned, unsigned> > A2A_fid;
+ 
++    // [patch] face weights of the current run: the segment from a query point to a Steiner point of
++    // its face costs w_f x length (the queries charged it at weight 1, below any weighted path)
++    inline vector<float> &query_face_weight() { static vector<float> w; return w; }
++    inline float qw(unsigned fid) { auto &w = query_face_weight(); return fid < w.size() ? w[fid] : 1.0f; }
+ 
+-    // memory used in KB.
+-    size_t physical_memory_used_by_process() {
+-        FILE *file = fopen("/proc/self/status", "r");
+-        int result = -1;
+-        char line[128];
+-
+-        while (fgets(line, 128, file) != nullptr) {
+-            if (strncmp(line, "VmRSS:", 6) == 0) {
+-                int len = strlen(line);
+-
+-                const char *p = line;
+-                for (; std::isdigit(*p) == false; ++p) {}
+ 
+-                line[len - 3] = 0;
+-                result = atoi(p);
+-
+-                break;
+-            }
+-        }
+-
+-        fclose(file);
+-
+-        return result;
++    // memory used in KB.
++    size_t physical_memory_used_by_process() { // macOS: resident size from mach task_info
++        mach_task_basic_info_data_t info; mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
++        if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count) != KERN_SUCCESS) return 0;
++        return info.resident_size / 1024;
+     }
+ 
+     int floatCmp(const float &x) {
+@@ -365,8 +353,8 @@ namespace Base {
+             Ray ray(bot, top);
+             Ray_intersection intersection = aabb_tree.first_intersection(ray);
+             if (intersection){
+-                if (boost::get<Point>(&(intersection->first))){
+-                    const Point* p = boost::get<Point>(&(intersection->first));
++                if (std::get_if<Point>(&(intersection->first))){
++                    const Point* p = std::get_if<Point>(&(intersection->first));
+                     pp = *p;
+                     break;
+                 }
+@@ -375,8 +363,8 @@ namespace Base {
+                 Ray ray2(bot, top2);
+                 intersection = aabb_tree.first_intersection(ray2);
+                 if (intersection){
+-                    if (boost::get<Point>(&(intersection->first))){
+-                        const Point* p = boost::get<Point>(&(intersection->first));
++                    if (std::get_if<Point>(&(intersection->first))){
++                        const Point* p = std::get_if<Point>(&(intersection->first));
+                         pp = *p;
+                         break;
+                     }
+diff --git a/getopt.hpp b/getopt.hpp
+index c18ebaa..ab4e0d7 100644
+--- a/getopt.hpp
++++ b/getopt.hpp
+@@ -66,38 +66,9 @@ namespace getopt_utils
+ 
+     // portable cmdline
+ 
+-    inline std::vector<std::string> cmdline() {
+-        std::vector<std::string> args;
+-        std::string arg;
+-#       ifdef _WIN32
+-        int argv;
+-            auto *list = CommandLineToArgvW( GetCommandLineW(), &argv );
+-            if( list ) {
+-                for( int i = 0; i < argv; ++i ) {
+-                    std::wstring ws( list[i] );
+-                    args.push_back( std::string( ws.begin(), ws.end() ) );
+-                }
+-                LocalFree(list);
+-            }
+-#       else
+-        pid_t pid = getpid();
+-
+-        char fname[32] = {};
+-        sprintf(fname, "/proc/%d/cmdline", pid);
+-        std::ifstream ifs(fname);
+-        if( ifs.good() ) {
+-            std::stringstream ss;
+-            ifs >> ss.rdbuf();
+-            arg = ss.str();
+-        }
+-        for( auto end = arg.size(), i = end - end; i < end; ++i ) {
+-            auto st = i;
+-            while (i < arg.size() && arg[i] != '\0') ++i;
+-            args.push_back( arg.substr(st, i - st) );
+-        }
+-#       endif
+-        return args;
+-    }
++    inline std::vector<std::string>& stored_args() { static std::vector<std::string> a; return a; }
++    inline void store_cmdline(int argc, char** argv) { stored_args().assign(argv, argv + argc); }
++    inline std::vector<std::string> cmdline() { return stored_args(); } // no /proc on macOS
+ }
+ 
+ // main map class; explicit initialization
+diff --git a/highway_well_separated.h b/highway_well_separated.h
+index 9e0fa72..b2b5a90 100644
+--- a/highway_well_separated.h
++++ b/highway_well_separated.h
+@@ -194,7 +194,7 @@ namespace Highway{
+                               map<int, vector<int>> &bisector_point_map,
+                               map<int, int> &point_face_map,
+                               map<int, Base::Point> &point_location_map) {
+-        auto start_time = chrono::_V2::system_clock::now();  //  timer
++        auto start_time = chrono::system_clock::now();  //  timer
+ 
+ //        vector<pair<int, int> > base_graph_edges = {};
+ //        vector<float> base_graph_weights = {};
+@@ -227,7 +227,7 @@ namespace Highway{
+             }
+         }
+ 
+-        auto end_time = chrono::_V2::system_clock::now();
++        auto end_time = chrono::system_clock::now();
+         auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+         return static_cast<float>(duration.count());
+     }
+diff --git a/k_skip.h b/k_skip.h
+index 762c57b..f3d83dd 100644
+--- a/k_skip.h
++++ b/k_skip.h
+@@ -91,7 +91,7 @@ namespace kSkip{
+ 
+     // s,t dijkstra query
+     pair<float, float> dijkstra(const Graph &g, const unsigned &s, const unsigned &t){
+-        auto start_time = chrono::_V2::system_clock::now();  //  timer
++        auto start_time = chrono::system_clock::now();  //  timer
+ 
+         vector<bool> vis(g.num_V, false);
+         vector<float> d(g.num_V, Base::unreachable);
+@@ -118,7 +118,7 @@ namespace kSkip{
+         }
+         assert(Base::floatCmp(d[t] - Base::unreachable) < 0);
+ 
+-        auto end_time = chrono::_V2::system_clock::now();
++        auto end_time = chrono::system_clock::now();
+         auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+         return make_pair(d[t], static_cast<float>(duration.count()));
+     }
+@@ -156,7 +156,7 @@ namespace kSkip{
+ 
+     //dijkstra for a given distance bound
+     float bounded_dijkstra(Graph &g, int s, float bound, vector<float> &d){
+-        auto start_time = chrono::_V2::system_clock::now();  //  timer
++        auto start_time = chrono::system_clock::now();  //  timer
+ 
+         vector<bool> vis(g.num_V, false);
+         d.resize(g.num_V, Base::unreachable);
+@@ -180,7 +180,7 @@ namespace kSkip{
+             vis[f.p] = true;
+         }
+ 
+-        auto end_time = chrono::_V2::system_clock::now();
++        auto end_time = chrono::system_clock::now();
+         auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+         return static_cast<float>(duration.count());
+     }
+@@ -216,7 +216,7 @@ namespace kSkip{
+     }
+ 
+     float covered_dijkstra(Graph &g, int s, set<int> &cover_id, vector<float> &d){
+-        auto start_time = chrono::_V2::system_clock::now();  //  timer
++        auto start_time = chrono::system_clock::now();  //  timer
+ 
+         vector<bool> vis(g.num_V, false);
+         d.resize(g.num_V, Base::unreachable);
+@@ -242,7 +242,7 @@ namespace kSkip{
+             if (cover_id.find(f.p) != cover_id.end()) cnt--;
+         }
+ 
+-        auto end_time = chrono::_V2::system_clock::now();
++        auto end_time = chrono::system_clock::now();
+         auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+         return static_cast<float>(duration.count());
+     }
+@@ -254,14 +254,14 @@ namespace kSkip{
+         unsigned sid = g.addVertex();
+         for (auto pid: face_point_map[fid_s]){
+             auto pt = point_location_map[pid];
+-            float dis = sqrt(CGAL::squared_distance(s, pt));
++            float dis = Base::qw(fid_s) * sqrt(CGAL::squared_distance(s, pt)); // [patch]
+             g.addEdge(sid, pid, dis);
+         }
+         //  add edges from t's neighbor Steiner points to t
+         unsigned tid = g.addVertex();
+         for (auto pid: face_point_map[fid_t]){
+             auto pt = point_location_map[pid];
+-            float dis = sqrt(CGAL::squared_distance(t, pt));
++            float dis = Base::qw(fid_t) * sqrt(CGAL::squared_distance(t, pt)); // [patch]
+             g.addEdge(pid, tid, dis);
+         }
+         float res = dijkstra(g, sid, tid).first;
+@@ -455,7 +455,7 @@ namespace kSkip{
+                                         eps, bisector_point_map, point_location_map, point_bisector_map, bisector_info[bisector_id].second);
+             for (auto sp_id: bisector_point_map[bisector_id]){
+                 Base::Point sp_p = point_location_map[sp_id];
+-                float dis = sqrt(CGAL::squared_distance(point_s, sp_p));
++                float dis = Base::qw(fid_s) * sqrt(CGAL::squared_distance(point_s, sp_p)); // [patch]
+                 edge_map[make_pair(s, sp_id)] = 1;
+                 g.addEdge(s, sp_id, dis);
+             }
+@@ -470,7 +470,7 @@ namespace kSkip{
+                                         eps, bisector_point_map, point_location_map, point_bisector_map , bisector_info[bisector_id].second);
+             for (auto sp_id: bisector_point_map[bisector_id]){
+                 Base::Point sp_p = point_location_map[sp_id];
+-                float dis = sqrt(CGAL::squared_distance(point_t, sp_p));
++                float dis = Base::qw(fid_t) * sqrt(CGAL::squared_distance(point_t, sp_p)); // [patch]
+                 edge_map[make_pair(t, sp_id)] = 1;
+                 g.addEdge(sp_id, t, dis);
+             }
+diff --git a/main.cpp b/main.cpp
+index 6bcb2e7..d88d046 100644
+--- a/main.cpp
++++ b/main.cpp
+@@ -4,6 +4,7 @@ using namespace std;
+ 
+ // laptop git test.
+ int main(int argc, char* argv[]) {
++    getopt_utils::store_cmdline(argc, argv);
+     Methods::run_new(argc, argv);
+     return 0;
+ }
+diff --git a/methods.h b/methods.h
+index 7334898..1e39bdc 100644
+--- a/methods.h
++++ b/methods.h
+@@ -21,7 +21,7 @@ namespace Methods{
+         map<unsigned, unsigned> point_face_map = {};
+         map<unsigned, Point> point_location_map = {};
+ 
+-        auto index_start = chrono::_V2::system_clock::now();
++        auto index_start = chrono::system_clock::now();
+         auto memory_begin = physical_memory_used_by_process();
+ 
+ //    vector<float> gama = WeightedDistanceOracle::getVertexGamma(surface_mesh, face_weight);
+@@ -54,7 +54,7 @@ namespace Methods{
+         fout << "Node pair set size: " << node_pairs.size() << endl;
+         fout << "Node pair percentage: " << fixed << setprecision(3) << 1.0 * node_pairs.size() / num_base_graph_vertices / num_base_graph_vertices << endl;
+ 
+-        auto index_end = chrono::_V2::system_clock::now();
++        auto index_end = chrono::system_clock::now();
+         auto index_duration = chrono::duration_cast<chrono::milliseconds>(index_end - index_start);
+         float index_time = index_duration.count();
+         auto memory_end = physical_memory_used_by_process();
+@@ -82,10 +82,10 @@ namespace Methods{
+             auto fid_s = A2A_fid[i].first;
+             auto fid_t = A2A_fid[i].second;
+ 
+-            auto q_start = chrono::_V2::system_clock::now();
++            auto q_start = chrono::system_clock::now();
+             float oracle_distance = WeightedDistanceOracle::distanceQueryA2A(s, fid_s, t, fid_t,tree,
+                                                                               face_point_map, point_location_map, node_pairs);
+-            auto q_end = chrono::_V2::system_clock::now();
++            auto q_end = chrono::system_clock::now();
+             auto q_duration = chrono::duration_cast<chrono::microseconds>(q_end - q_start);
+ 
+             V2V_results.emplace_back(oracle_distance);
+@@ -105,7 +105,7 @@ namespace Methods{
+         map<unsigned, unsigned> point_face_map;
+         map<unsigned, Point> point_location_map;
+ 
+-        auto index_start = chrono::_V2::system_clock::now();
++        auto index_start = chrono::system_clock::now();
+         auto memory_begin = physical_memory_used_by_process();
+ 
+ //    vector<float> gama = WeightedDistanceOracle::getVertexGamma(surface_mesh, face_weight);
+@@ -158,7 +158,7 @@ namespace Methods{
+ 
+         Quad::distancePreprocessing(quad_tree, kSkip::my_base_graph, face_point_map);
+ 
+-        auto index_end = chrono::_V2::system_clock::now();
++        auto index_end = chrono::system_clock::now();
+         auto index_duration = chrono::duration_cast<chrono::milliseconds>(index_end - index_start);
+         float index_time = index_duration.count();
+         auto memory_end = physical_memory_used_by_process();
+@@ -189,12 +189,12 @@ namespace Methods{
+ //        cout << "s = " << s << " t = " << t << endl;
+             Quad::dijkstra_running_time = 0.0;
+ 
+-            auto q_start = chrono::_V2::system_clock::now();
++            auto q_start = chrono::system_clock::now();
+             auto ret = Quad::queryA2A(spanner, kSkip::my_base_graph, face_point_map, tree, node_pairs,
+                                       point_location_map,
+                                       s, fid_s, t, fid_t,quad_tree, new_id, kappa);
+             float spanner_distance = ret.first;
+-            auto q_end = chrono::_V2::system_clock::now();
++            auto q_end = chrono::system_clock::now();
+             auto q_duration = chrono::duration_cast<chrono::microseconds>(q_end - q_start);
+ 
+             float entire_cur_query_time = static_cast<float>(q_duration.count());
+@@ -228,7 +228,7 @@ namespace Methods{
+                 auto s = A2A_query[i].first;
+                 auto t = A2A_query[i].second;
+ 
+-                auto q_start = chrono::_V2::system_clock::now();
++                auto q_start = chrono::system_clock::now();
+ 
+                 auto location_s = CGAL::Polygon_mesh_processing::locate_with_AABB_tree(s, aabb_tree, mesh);
+                 auto location_t = CGAL::Polygon_mesh_processing::locate_with_AABB_tree(t, aabb_tree, mesh);
+@@ -237,7 +237,7 @@ namespace Methods{
+                 float mmp_distance = ret_pair.first;
+                 shortest_paths.remove_all_source_points();
+ 
+-                auto q_end = chrono::_V2::system_clock::now();
++                auto q_end = chrono::system_clock::now();
+                 auto q_duration = chrono::duration_cast<chrono::microseconds>(q_end - q_start);
+ 
+                 A2A_result.emplace_back(mmp_distance);
+@@ -285,11 +285,11 @@ namespace Methods{
+                 auto t = A2A_query[i].second;
+                 unsigned fid_s = A2A_fid[i].first;
+                 unsigned fid_t = A2A_fid[i].second;
+-                auto q_start = chrono::_V2::system_clock::now();
++                auto q_start = chrono::system_clock::now();
+ 
+                 float dijk_distance = kSkip::queryGraphA2A(kSkip::my_base_graph, s, fid_s, t, fid_t, face_point_map, point_location_map);
+ 
+-                auto q_end = chrono::_V2::system_clock::now();
++                auto q_end = chrono::system_clock::now();
+                 auto q_duration = chrono::duration_cast<chrono::microseconds>(q_end - q_start);
+ 
+                 A2A_result.emplace_back(dijk_distance);
+@@ -326,13 +326,13 @@ namespace Methods{
+                 auto t = A2A_query[i].second;
+                 unsigned fid_s = A2A_fid[i].first;
+                 unsigned fid_t = A2A_fid[i].second;
+-                auto q_start = chrono::_V2::system_clock::now();
++                auto q_start = chrono::system_clock::now();
+ 
+ //                float dijk_distance = kSkip::queryGraphA2A(kSkip::my_base_graph, s, fid_s, t, fid_t, face_point_map,
+ //                                                           point_location_map);
+                 float dijk_distance = kSkip::unfixedOnTheFly(mesh, g, err, gama, face_weight, s, fid_s, t, fid_t);
+ 
+-                auto q_end = chrono::_V2::system_clock::now();
++                auto q_end = chrono::system_clock::now();
+                 auto q_duration = chrono::duration_cast<chrono::microseconds>(q_end - q_start);
+ 
+                 A2A_result.emplace_back(dijk_distance);
+@@ -383,12 +383,12 @@ namespace Methods{
+                 auto t = A2A_query[i].second;
+                 unsigned fid_s = A2A_fid[i].first;
+                 unsigned fid_t = A2A_fid[i].second;
+-                auto q_start = chrono::_V2::system_clock::now();
++                auto q_start = chrono::system_clock::now();
+ 
+                 float dijk_distance = kSkip::queryGraphA2A(kSkip::my_base_graph, s, fid_s, t, fid_t, face_point_map,
+                                                            point_location_map);
+ 
+-                auto q_end = chrono::_V2::system_clock::now();
++                auto q_end = chrono::system_clock::now();
+                 auto q_duration = chrono::duration_cast<chrono::microseconds>(q_end - q_start);
+ 
+                 A2A_result.push_back(dijk_distance);
+@@ -452,11 +452,11 @@ namespace Methods{
+                 auto t = A2A_query[i].second;
+                 unsigned fid_s = A2A_fid[i].first;
+                 unsigned fid_t = A2A_fid[i].second;
+-                auto q_start = chrono::_V2::system_clock::now();
++                auto q_start = chrono::system_clock::now();
+ 
+                 float kAlgo_distance = kSkip::computeDistanceBound(mesh, g, K, s, fid_s, t, fid_t, l_min);
+ 
+-                auto q_end = chrono::_V2::system_clock::now();
++                auto q_end = chrono::system_clock::now();
+                 auto q_duration = chrono::duration_cast<chrono::microseconds>(q_end - q_start);
+ 
+                 A2A_result.emplace_back(kAlgo_distance);
+@@ -513,7 +513,7 @@ namespace Methods{
+         map<unsigned, unsigned> point_face_map;
+         map<unsigned, Point> point_location_map;
+ 
+-        auto index_start = chrono::_V2::system_clock::now();
++        auto index_start = chrono::system_clock::now();
+         auto memory_begin = physical_memory_used_by_process();
+ 
+         auto ret_place_points = WeightedDistanceOracle::placeSteinerPointsFixed(mesh, sp_num, edge_bisector_map,
+@@ -564,7 +564,7 @@ namespace Methods{
+ 
+         Quad::distancePreprocessing(quad_tree, kSkip::my_base_graph, face_point_map);
+ 
+-        auto index_end = chrono::_V2::system_clock::now();
++        auto index_end = chrono::system_clock::now();
+         auto index_duration = chrono::duration_cast<chrono::milliseconds>(index_end - index_start);
+         float index_time = index_duration.count();
+         auto memory_end = physical_memory_used_by_process();
+@@ -708,6 +708,7 @@ namespace Methods{
+             fout << "Load A2A queries finished." << endl;
+             vector<float> face_weight = {};
+             loadFaceWeight(face_weight);
++            Base::query_face_weight() = face_weight; // [patch]
+             fout << "Load face weight finished." << endl;
+ 
+             unsigned level = floor(log2(1.0 * grid_num) * 0.5 + eps);
+diff --git a/quad.h b/quad.h
+index f35e930..55d4ab0 100644
+--- a/quad.h
++++ b/quad.h
+@@ -378,12 +378,12 @@ namespace Quad{
+         auto sid = base_graph.addVertex();
+         for (auto pid: face_point_map[fid_s]){
+             float dis = CGAL::squared_distance(s, point_location_map[pid]);
+-            base_graph.addEdge(sid, pid, sqrt(dis));
++            base_graph.addEdge(sid, pid, Base::qw(fid_s) * sqrt(dis)); // [patch]
+         }
+         auto tid = base_graph.addVertex();
+         for (auto pid: face_point_map[fid_t]){
+             float dis = CGAL::squared_distance(t, point_location_map[pid]);
+-            base_graph.addEdge(pid, tid, sqrt(dis));
++            base_graph.addEdge(pid, tid, Base::qw(fid_t) * sqrt(dis)); // [patch]
+         }
+ 
+         float res = -1.0;
+@@ -431,8 +431,8 @@ namespace Quad{
+                 for (auto bpid: box_s->boundary_points_id) {
+                     float d = Base::unreachable;
+                     for (auto pid: face_point_map[fid_s]) {
+-                        //                    float t_dis = sqrt(CGAL::squared_distance(s, point_location_map[pid])) + EAR_distance_map[make_pair(closest_pid, bpid)];
+-                        float t_dis = sqrt(CGAL::squared_distance(s, point_location_map[pid])) +
++                        //                    float t_dis = Base::qw(fid_s) * sqrt(CGAL::squared_distance(s, point_location_map[pid])) + // [patch] EAR_distance_map[make_pair(closest_pid, bpid)];
++                        float t_dis = Base::qw(fid_s) * sqrt(CGAL::squared_distance(s, point_location_map[pid])) + // [patch]
+                                       EAR_distance_map[make_pair(pid, bpid)];
+                         if (Base::floatCmp(t_dis - d) < 0) d = t_dis;
+                     }
+@@ -442,18 +442,18 @@ namespace Quad{
+                 for (auto bpid: box_t->boundary_points_id) {
+                     float d = Base::unreachable;
+                     for (auto pid: face_point_map[fid_t]) {
+-                        float t_dis = sqrt(CGAL::squared_distance(t, point_location_map[pid])) +
++                        float t_dis = Base::qw(fid_t) * sqrt(CGAL::squared_distance(t, point_location_map[pid])) + // [patch]
+                                       EAR_distance_map[make_pair(pid, bpid)];
+                         if (Base::floatCmp(t_dis - d) < 0) d = t_dis;
+                     }
+                     spanner.addEdge(new_id[bpid], final_t, d);
+                 }
+ 
+-                auto q_start = chrono::_V2::system_clock::now();    //  break down time evaluation
++                auto q_start = chrono::system_clock::now();    //  break down time evaluation
+ 
+                 res = kSkip::dijkstra(spanner, final_s, final_t).first;
+ 
+-                auto q_end = chrono::_V2::system_clock::now();
++                auto q_end = chrono::system_clock::now();
+                 auto q_duration = chrono::duration_cast<chrono::microseconds>(q_end - q_start);
+                 dijkstra_running_time += static_cast<float>(q_duration.count());
+             }
+@@ -474,19 +474,19 @@ namespace Quad{
+             auto sid = base_graph.addVertex();
+             for (auto pid: face_point_map[fid_s]){
+                 float dis = CGAL::squared_distance(s, point_location_map[pid]);
+-                base_graph.addEdge(sid, pid, sqrt(dis));
++                base_graph.addEdge(sid, pid, Base::qw(fid_s) * sqrt(dis)); // [patch]
+             }
+             auto tid = base_graph.addVertex();
+             for (auto pid: face_point_map[fid_t]){
+                 float dis = CGAL::squared_distance(t, point_location_map[pid]);
+-                base_graph.addEdge(pid, tid, sqrt(dis));
++                base_graph.addEdge(pid, tid, Base::qw(fid_t) * sqrt(dis)); // [patch]
+             }
+ 
+-            auto q_start = chrono::_V2::system_clock::now();    //  break down time evaluation
++            auto q_start = chrono::system_clock::now();    //  break down time evaluation
+ 
+             res = kSkip::dijkstra(base_graph, sid, tid).first;
+ 
+-            auto q_end = chrono::_V2::system_clock::now();
++            auto q_end = chrono::system_clock::now();
+             auto q_duration = chrono::duration_cast<chrono::microseconds>(q_end - q_start);
+             dijkstra_running_time += static_cast<float>(q_duration.count());
+         }
+@@ -544,7 +544,7 @@ namespace Quad{
+             for (auto bpid: box_s->boundary_points_id){
+                 float d = Base::unreachable;
+                 for (auto pid: face_point_map[fid_s]){
+-                    float t_dis = sqrt(CGAL::squared_distance(s, point_location_map[pid])) + EAR_distance_map[make_pair(pid, bpid)];
++                    float t_dis = Base::qw(fid_s) * sqrt(CGAL::squared_distance(s, point_location_map[pid])) + EAR_distance_map[make_pair(pid, bpid)]; // [patch]
+                     if (Base::floatCmp(t_dis - d) < 0) d = t_dis;
+                 }
+                 spanner.addEdge(final_s, new_id[bpid], d);
+@@ -554,7 +554,7 @@ namespace Quad{
+             for (auto bpid: box_t->boundary_points_id){
+                 float d = Base::unreachable;
+                 for (auto pid: face_point_map[fid_t]){
+-                    float t_dis = sqrt(CGAL::squared_distance(t, point_location_map[pid])) + EAR_distance_map[make_pair(pid, bpid)];
++                    float t_dis = Base::qw(fid_t) * sqrt(CGAL::squared_distance(t, point_location_map[pid])) + EAR_distance_map[make_pair(pid, bpid)]; // [patch]
+                     if (Base::floatCmp(t_dis - d) < 0) d = t_dis;
+                 }
+                 spanner.addEdge(new_id[bpid], final_t, d);
+@@ -577,12 +577,12 @@ namespace Quad{
+             auto sid = base_graph.addVertex();
+             for (auto pid: face_point_map[fid_s]){
+                 float dis = CGAL::squared_distance(s, point_location_map[pid]);
+-                base_graph.addEdge(sid, pid, sqrt(dis));
++                base_graph.addEdge(sid, pid, Base::qw(fid_s) * sqrt(dis)); // [patch]
+             }
+             auto tid = base_graph.addVertex();
+             for (auto pid: face_point_map[fid_t]){
+                 float dis = CGAL::squared_distance(t, point_location_map[pid]);
+-                base_graph.addEdge(pid, tid, sqrt(dis));
++                base_graph.addEdge(pid, tid, Base::qw(fid_t) * sqrt(dis)); // [patch]
+             }
+             float res = kSkip::dijkstra(base_graph, sid, tid).first;
+ 
+diff --git a/weighted_distance_oracle.h b/weighted_distance_oracle.h
+index b8f880b..5097711 100644
+--- a/weighted_distance_oracle.h
++++ b/weighted_distance_oracle.h
+@@ -59,7 +59,7 @@ namespace WeightedDistanceOracle {
+                            map<unsigned, unsigned> &point_face_map,
+                            map<unsigned, Base::Point> &point_location_map,
+                            map<unsigned, vector<unsigned>> &face_point_map){
+-        auto start_time = chrono::_V2::system_clock::now();  //  timer
++        auto start_time = chrono::system_clock::now();  //  timer
+ 
+         unsigned num_vertices = mesh.num_vertices();
+         unsigned bisector_num = 0;
+@@ -118,7 +118,7 @@ namespace WeightedDistanceOracle {
+             }
+         }
+ 
+-        auto end_time = chrono::_V2::system_clock::now();
++        auto end_time = chrono::system_clock::now();
+         auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+         return make_pair(static_cast<float>(duration.count()), num_vertices);
+     }
+@@ -129,7 +129,7 @@ namespace WeightedDistanceOracle {
+                                                   map<unsigned, unsigned> &point_face_map,
+                                                   map<unsigned, Base::Point> &point_location_map,
+                                                   map<unsigned, vector<unsigned>> &face_point_map) {
+-        auto start_time = chrono::_V2::system_clock::now();  //  timer
++        auto start_time = chrono::system_clock::now();  //  timer
+ 
+         unsigned num_vertices = mesh.num_vertices();
+         unsigned bisector_num = 0;
+@@ -173,7 +173,7 @@ namespace WeightedDistanceOracle {
+             }
+         }
+ 
+-        auto end_time = chrono::_V2::system_clock::now();
++        auto end_time = chrono::system_clock::now();
+         auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+         return make_pair(static_cast<float>(duration.count()), num_vertices);
+     }
+@@ -185,7 +185,7 @@ namespace WeightedDistanceOracle {
+                              map<unsigned, vector<unsigned>> &bisector_point_map,
+                              map<unsigned, unsigned> &point_face_map,
+                              map<unsigned, Base::Point> &point_location_map) {
+-        auto start_time = chrono::_V2::system_clock::now();  //  timer
++        auto start_time = chrono::system_clock::now();  //  timer
+ 
+         bool g_flag = true;
+         if (kSkip::my_base_graph.num_V != num_vertices){
+@@ -227,7 +227,7 @@ namespace WeightedDistanceOracle {
+                                  num_vertices);
+ 
+ 
+-        auto end_time = chrono::_V2::system_clock::now();
++        auto end_time = chrono::system_clock::now();
+         auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+         return static_cast<float>(duration.count());
+     }
+@@ -332,7 +332,7 @@ namespace WeightedDistanceOracle {
+     }
+ 
+     float PartitionTree::generateNodePairSet(const float &eps, const int &type, const unsigned &sp_num, set<nodePair> &node_pair_set) {
+-        auto start_time = chrono::_V2::system_clock::now();  //  timer
++        auto start_time = chrono::system_clock::now();  //  timer
+ 
+         priority_queue<nodePairWithValue , vector<nodePairWithValue>, greater<nodePairWithValue> > q;
+         float center_distance = 0.0;
+@@ -380,14 +380,14 @@ namespace WeightedDistanceOracle {
+             q.pop();
+         }
+ 
+-        auto end_time = chrono::_V2::system_clock::now();
++        auto end_time = chrono::system_clock::now();
+         auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+         return static_cast<float>(duration.count());
+     }
+ 
+     // Construct partition tree.
+     float PartitionTree::constructTree(ofstream &fout, const vector<unsigned> &pid_list, const float &l) {
+-        auto start_time = chrono::_V2::system_clock::now();  //  timer
++        auto start_time = chrono::system_clock::now();  //  timer
+ 
+         auto num_vertices = pid_list.size();
+         rootNodeSelect(pid_list);
+@@ -403,7 +403,7 @@ namespace WeightedDistanceOracle {
+         }
+         fout << "[Partition Tree] totally " << num_tree_nodes << " nodes " << endl;
+ 
+-        auto end_time = chrono::_V2::system_clock::now();
++        auto end_time = chrono::system_clock::now();
+         auto duration = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+ 
+         return static_cast<float>(duration.count());
