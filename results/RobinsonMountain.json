@@ -1,0 +1,336 @@
+{
+ "mesh": "RobinsonMountain",
+ "n": 3696,
+ "faces": 7200,
+ "queries": 100,
+ "exact_ms": 46.92007541001658,
+ "k": 32,
+ "rows": [
+  {
+   "method": "dijkstra on mesh graph (no index)",
+   "build_s": 0.0,
+   "index_bytes": 0,
+   "query_us": 4874.931249942165,
+   "err_mean": 5.958354658824679,
+   "err_max": 15.236603859433773,
+   "err_min": 1.2716675710026104,
+   "err_p90": 9.362189455544394
+  },
+  {
+   "method": "h2h",
+   "build_s": 1.09531383299327,
+   "index_bytes": 7998732,
+   "query_us": 7.6154198904987425,
+   "err_mean": 5.958354658824675,
+   "err_max": 15.236603859433773,
+   "err_min": 1.2716675710026326,
+   "err_p90": 9.362189455544375
+  },
+  {
+   "method": "vertex portals k=32",
+   "build_s": 21.36797058400407,
+   "index_bytes": 5569360,
+   "query_us": 3.345419972902164,
+   "err_mean": 6.188490606609632,
+   "err_max": 15.236603859433773,
+   "err_min": 1.9865150596921843,
+   "err_p90": 9.362189455544375
+  },
+  {
+   "method": "cut portals k=16, exact MMP labels + interp, A2A snap",
+   "build_s": 320.7085683339974,
+   "index_bytes": 6468552,
+   "query_us": 165.2224999270402,
+   "err_mean": 1.3910092849332178,
+   "err_max": 11.260533057502741,
+   "err_min": -0.06623569293930931,
+   "err_p90": 2.9020498444705267,
+   "abs_err_mean": 1.392333998792004
+  },
+  {
+   "method": "cut portals k=16, exact MMP labels + interp, A2A interp",
+   "build_s": 320.7085683339974,
+   "index_bytes": 6468552,
+   "query_us": 165.02750004292466,
+   "err_mean": 0.38232243906103747,
+   "err_max": 4.039945332865114,
+   "err_min": -0.30504235113534284,
+   "err_p90": 0.8426610111555926,
+   "abs_err_mean": 0.3970914637618882
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels + interp, A2A snap",
+   "build_s": 304.1589277499879,
+   "index_bytes": 10318536,
+   "query_us": 98.13707991270348,
+   "err_mean": 1.201930758727362,
+   "err_max": 11.25779122301731,
+   "err_min": 0.0,
+   "err_p90": 2.5947763985754717,
+   "abs_err_mean": 1.201930758727362
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels + interp, A2A interp",
+   "build_s": 304.1589277499879,
+   "index_bytes": 10318536,
+   "query_us": 98.5962500271853,
+   "err_mean": 0.16721682800139204,
+   "err_max": 1.194290617993321,
+   "err_min": -0.15254243153379754,
+   "err_p90": 0.38943335447784194,
+   "abs_err_mean": 0.18294155873411777
+  },
+  {
+   "method": "cut portals k=64, exact MMP labels + interp, A2A snap",
+   "build_s": 526.6362754579895,
+   "index_bytes": 18018504,
+   "query_us": 98.88083004625514,
+   "err_mean": 1.157323559382576,
+   "err_max": 11.255805909078864,
+   "err_min": 0.0,
+   "err_p90": 2.48312626697091,
+   "abs_err_mean": 1.157323559382576
+  },
+  {
+   "method": "cut portals k=64, exact MMP labels + interp, A2A interp",
+   "build_s": 526.6362754579895,
+   "index_bytes": 18018504,
+   "query_us": 100.32958001829684,
+   "err_mean": 0.10171003494769659,
+   "err_max": 0.8702587121638405,
+   "err_min": -0.15449331545434042,
+   "err_p90": 0.28129196049137223,
+   "abs_err_mean": 0.11665082880680122
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels, k~|cut| + interp, A2A snap",
+   "build_s": 110.32124520899379,
+   "index_bytes": 5437640,
+   "query_us": 99.60499999579042,
+   "err_mean": 1.346955565030223,
+   "err_max": 11.926321660715612,
+   "err_min": 0.0,
+   "err_p90": 2.786827022101673,
+   "abs_err_mean": 1.346955565030223
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels, k~|cut| + interp, A2A interp",
+   "build_s": 110.32124520899379,
+   "index_bytes": 5437640,
+   "query_us": 99.81750001315959,
+   "err_mean": 0.3031579235604327,
+   "err_max": 3.6892594035894843,
+   "err_min": -0.16758648309912472,
+   "err_p90": 0.7545359638063888,
+   "abs_err_mean": 0.3165443137450388
+  },
+  {
+   "method": "cut portals k=16, exact MMP labels",
+   "build_s": 248.02030404200195,
+   "index_bytes": 4658776,
+   "query_us": 3.834999952232465,
+   "err_mean": 0.43540903726537156,
+   "err_max": 9.826324118919949,
+   "err_min": -4.904348593903762e-06,
+   "err_p90": 0.8473768888559859
+  },
+  {
+   "method": "cut portals k=16, exact MMP labels + interp",
+   "build_s": 248.02030404200195,
+   "index_bytes": 4658776,
+   "query_us": 9.576670054229908,
+   "err_mean": 0.31174229843487455,
+   "err_max": 9.20677852593239,
+   "err_min": -0.41741853767747195,
+   "err_p90": 0.748104235159819
+  },
+  {
+   "method": "cut portals k=16, exact MMP labels + model interp",
+   "build_s": 248.02030404200195,
+   "index_bytes": 4658776,
+   "query_us": 27.749590008170344,
+   "err_mean": 0.21251882758063922,
+   "err_max": 1.8954440764852087,
+   "err_min": -0.369607184941545,
+   "err_p90": 0.671419757053376
+  },
+  {
+   "method": "cut portals k=16, exact MMP labels + model interp, A2A snap",
+   "build_s": 248.02030404200195,
+   "index_bytes": 4658776,
+   "query_us": 306.5658400009852,
+   "err_mean": 1.323429979633845,
+   "err_max": 11.426514255068065,
+   "err_min": -0.05379777142480169,
+   "err_p90": 2.6821010952380164,
+   "abs_err_mean": 1.324754180943868
+  },
+  {
+   "method": "cut portals k=16, exact MMP labels + model interp, A2A interp",
+   "build_s": 248.02030404200195,
+   "index_bytes": 4658776,
+   "query_us": 298.81374997785315,
+   "err_mean": 0.2692200860559534,
+   "err_max": 2.4041421474910285,
+   "err_min": -0.17309250881286653,
+   "err_p90": 0.6653797828478646,
+   "abs_err_mean": 0.2874659435818451
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels",
+   "build_s": 421.02783225000167,
+   "index_bytes": 6616408,
+   "query_us": 4.744580000988208,
+   "err_mean": 0.11142014616056883,
+   "err_max": 1.5821292750637594,
+   "err_min": -4.904348593903762e-06,
+   "err_p90": 0.2764181185835237
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels + interp",
+   "build_s": 421.02783225000167,
+   "index_bytes": 6616408,
+   "query_us": 11.98333004140295,
+   "err_mean": 0.07601760756155906,
+   "err_max": 1.233902983862989,
+   "err_min": -0.39419260038869863,
+   "err_p90": 0.2393566002732952
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels + model interp",
+   "build_s": 421.02783225000167,
+   "index_bytes": 6616408,
+   "query_us": 27.039170017815195,
+   "err_mean": 0.07809437022625398,
+   "err_max": 1.5821292750637594,
+   "err_min": -0.11482279150890617,
+   "err_p90": 0.2141874192201577
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels + model interp, A2A snap",
+   "build_s": 421.02783225000167,
+   "index_bytes": 6616408,
+   "query_us": 279.7879100398859,
+   "err_mean": 1.2070095306751984,
+   "err_max": 11.267875736704113,
+   "err_min": 0.0,
+   "err_p90": 2.6489207126055567,
+   "abs_err_mean": 1.2070095306751984
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels + model interp, A2A interp",
+   "build_s": 421.02783225000167,
+   "index_bytes": 6616408,
+   "query_us": 289.262919977773,
+   "err_mean": 0.15085471754169733,
+   "err_max": 0.9752488623987032,
+   "err_min": -0.21314023823684192,
+   "err_p90": 0.3473381510603858,
+   "abs_err_mean": 0.16462085341576593
+  },
+  {
+   "method": "cut portals k=64, exact MMP labels",
+   "build_s": 702.5853562499979,
+   "index_bytes": 10531672,
+   "query_us": 3.850420034723356,
+   "err_mean": 0.04111692680614998,
+   "err_max": 0.5062630732616258,
+   "err_min": -4.904348593903762e-06,
+   "err_p90": 0.09617197445791276
+  },
+  {
+   "method": "cut portals k=64, exact MMP labels + interp",
+   "build_s": 702.5853562499979,
+   "index_bytes": 10531672,
+   "query_us": 9.72458001342602,
+   "err_mean": 0.025269138995386964,
+   "err_max": 0.45587430405804596,
+   "err_min": -0.13490282365902218,
+   "err_p90": 0.0658878602367553
+  },
+  {
+   "method": "cut portals k=64, exact MMP labels + model interp",
+   "build_s": 702.5853562499979,
+   "index_bytes": 10531672,
+   "query_us": 17.59083999786526,
+   "err_mean": 0.02842211961595054,
+   "err_max": 0.5062630732616258,
+   "err_min": -0.08860779778055994,
+   "err_p90": 0.05555345800955633
+  },
+  {
+   "method": "cut portals k=64, exact MMP labels + model interp, A2A snap",
+   "build_s": 702.5853562499979,
+   "index_bytes": 10531672,
+   "query_us": 186.77084000955801,
+   "err_mean": 1.1549643721762237,
+   "err_max": 11.255803305402656,
+   "err_min": 0.0,
+   "err_p90": 2.486199376773953,
+   "abs_err_mean": 1.1549643721762237
+  },
+  {
+   "method": "cut portals k=64, exact MMP labels + model interp, A2A interp",
+   "build_s": 702.5853562499979,
+   "index_bytes": 10531672,
+   "query_us": 192.46957999712322,
+   "err_mean": 0.09787035733411698,
+   "err_max": 0.8702601644318131,
+   "err_min": -0.15449372892453184,
+   "err_p90": 0.2324529858442515,
+   "abs_err_mean": 0.11163906240931964
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels, k~|cut|",
+   "build_s": 145.61607466600253,
+   "index_bytes": 4120608,
+   "query_us": 3.574579968699254,
+   "err_mean": 0.45184262195540104,
+   "err_max": 10.408858248726528,
+   "err_min": -4.904348593903762e-06,
+   "err_p90": 0.7752888284655488
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels, k~|cut| + interp",
+   "build_s": 145.61607466600253,
+   "index_bytes": 4120608,
+   "query_us": 8.984170053736307,
+   "err_mean": 0.30751810529875667,
+   "err_max": 10.27187510008054,
+   "err_min": -0.39419260038869863,
+   "err_p90": 0.551171265486066
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels, k~|cut| + model interp",
+   "build_s": 145.61607466600253,
+   "index_bytes": 4120608,
+   "query_us": 23.896249986137263,
+   "err_mean": 0.18730398211555288,
+   "err_max": 3.4911097657183365,
+   "err_min": -0.21127898814697899,
+   "err_p90": 0.38132855614711814
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels, k~|cut| + model interp, A2A snap",
+   "build_s": 145.61607466600253,
+   "index_bytes": 4120608,
+   "query_us": 250.38125000719447,
+   "err_mean": 1.2769686042783153,
+   "err_max": 11.697258229676088,
+   "err_min": 0.0,
+   "err_p90": 2.744558214838734,
+   "abs_err_mean": 1.2769686042783153
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels, k~|cut| + model interp, A2A interp",
+   "build_s": 145.61607466600253,
+   "index_bytes": 4120608,
+   "query_us": 317.67917003890034,
+   "err_mean": 0.21787397122507024,
+   "err_max": 1.5815050021344534,
+   "err_min": -0.18549506734258925,
+   "err_p90": 0.4655280004981567,
+   "abs_err_mean": 0.2281632161996118
+  }
+ ]
+}

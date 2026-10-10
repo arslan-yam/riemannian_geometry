@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rgeo"
+version = "0.1.0"
+description = "Shortest-path distance oracles on 2-d Riemannian manifolds and polyhedral terrains (Separator Cut Index)"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "scipy>=1.11", "matplotlib>=3.8", "pygeodesic>=0.1.8"]
+
+[project.optional-dependencies]
+dev = ["pytest", "jupyter", "pyflakes"]
+
+[tool.setuptools.packages.find]
+include = ["rgeo*"]

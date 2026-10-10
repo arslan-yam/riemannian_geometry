@@ -1,0 +1,366 @@
+{
+ "mesh": "HorseMount",
+ "n": 793,
+ "faces": 1488,
+ "queries": 100,
+ "exact_ms": 7.7529162500286475,
+ "k": 32,
+ "rows": [
+  {
+   "method": "dijkstra on mesh graph (no index)",
+   "build_s": 0.0,
+   "index_bytes": 0,
+   "query_us": 750.8708401292097,
+   "err_mean": 6.14106698892791,
+   "err_max": 39.62359303851415,
+   "err_min": 0.0,
+   "err_p90": 10.12656911040356
+  },
+  {
+   "method": "h2h",
+   "build_s": 0.08251758299593348,
+   "index_bytes": 647916,
+   "query_us": 5.56707993382588,
+   "err_mean": 6.141066988927908,
+   "err_max": 39.62359303851415,
+   "err_min": 0.0,
+   "err_p90": 10.126569110403558
+  },
+  {
+   "method": "vertex portals k=32",
+   "build_s": 0.8533270830084803,
+   "index_bytes": 768528,
+   "query_us": 3.0362499819602817,
+   "err_mean": 6.161136581331993,
+   "err_max": 39.62359303851415,
+   "err_min": 0.0,
+   "err_p90": 10.12656911040352
+  },
+  {
+   "method": "cut portals k=16, exact MMP labels + interp, A2A snap",
+   "build_s": 15.123632584000006,
+   "index_bytes": 1102684,
+   "query_us": 253.89499991433695,
+   "err_mean": 1.8299493503316662,
+   "err_max": 20.31574702537067,
+   "err_min": 0.0,
+   "err_p90": 4.598777274156466,
+   "abs_err_mean": 1.8299493503316662
+  },
+  {
+   "method": "cut portals k=16, exact MMP labels + interp, A2A interp",
+   "build_s": 15.123632584000006,
+   "index_bytes": 1102684,
+   "query_us": 252.06790989614095,
+   "err_mean": 0.2715310662767175,
+   "err_max": 3.5840293532736434,
+   "err_min": -0.06899529714000652,
+   "err_p90": 0.5919757125650812,
+   "abs_err_mean": 0.2753135018669476
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels + interp, A2A snap",
+   "build_s": 24.64147074999346,
+   "index_bytes": 1727836,
+   "query_us": 266.96749991970137,
+   "err_mean": 1.7618619030519291,
+   "err_max": 20.31574702537067,
+   "err_min": 0.0,
+   "err_p90": 4.46525237833348,
+   "abs_err_mean": 1.7618619030519291
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels + interp, A2A interp",
+   "build_s": 24.64147074999346,
+   "index_bytes": 1727836,
+   "query_us": 251.5383299032692,
+   "err_mean": 0.1877194443511493,
+   "err_max": 3.6360375464656425,
+   "err_min": -0.07731552472252101,
+   "err_p90": 0.3971856537732756,
+   "abs_err_mean": 0.19125768797410092
+  },
+  {
+   "method": "cut portals k=64, exact MMP labels + interp, A2A snap",
+   "build_s": 44.870126167006674,
+   "index_bytes": 2978140,
+   "query_us": 256.96041993796825,
+   "err_mean": 1.7347269371591896,
+   "err_max": 20.31574702537067,
+   "err_min": 0.0,
+   "err_p90": 4.061774074788996,
+   "abs_err_mean": 1.7347269371591896
+  },
+  {
+   "method": "cut portals k=64, exact MMP labels + interp, A2A interp",
+   "build_s": 44.870126167006674,
+   "index_bytes": 2978140,
+   "query_us": 257.9037500254344,
+   "err_mean": 0.15586843806957829,
+   "err_max": 3.479100267799451,
+   "err_min": -0.07285564775549869,
+   "err_p90": 0.34167024585176625,
+   "abs_err_mean": 0.16088163694339963
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels, k~|cut| + interp, A2A snap",
+   "build_s": 11.914683750001132,
+   "index_bytes": 1176636,
+   "query_us": 253.3699999912642,
+   "err_mean": 1.7864995416339755,
+   "err_max": 20.31574702537067,
+   "err_min": 0.0,
+   "err_p90": 4.469354107843602,
+   "abs_err_mean": 1.7864995416339755
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels, k~|cut| + interp, A2A interp",
+   "build_s": 11.914683750001132,
+   "index_bytes": 1176636,
+   "query_us": 252.40749993827194,
+   "err_mean": 0.19193363117890927,
+   "err_max": 3.501335069815603,
+   "err_min": -0.07731552472252101,
+   "err_p90": 0.3949450238980102,
+   "abs_err_mean": 0.19593932053425833
+  },
+  {
+   "method": "cut portals k=32, refined labels (rounds=1, seg=12)",
+   "build_s": 1526.552659959,
+   "index_bytes": 2060768,
+   "query_us": 5.668339999829186,
+   "err_mean": 0.10295957565953717,
+   "err_max": 2.463170284830185,
+   "err_min": 0.0,
+   "err_p90": 0.19966336426614945
+  },
+  {
+   "method": "cut portals k=32, refined labels (rounds=1, seg=12) + interp",
+   "build_s": 1526.552659959,
+   "index_bytes": 2060768,
+   "query_us": 12.077500000486907,
+   "err_mean": 0.08485208403811173,
+   "err_max": 2.259372156650108,
+   "err_min": -0.024364581287816822,
+   "err_p90": 0.14722099458571086
+  },
+  {
+   "method": "dijkstra + refine at query time",
+   "build_s": 0.0,
+   "index_bytes": 0,
+   "query_us": 52093.544466667176,
+   "err_mean": 0.053220569695751806,
+   "err_max": 0.5634236331146125,
+   "err_min": 3.8404966051786005e-05,
+   "err_p90": 0.11307076764524693
+  },
+  {
+   "method": "cut portals k=16, exact MMP labels",
+   "build_s": 12.537749666000309,
+   "index_bytes": 816020,
+   "query_us": 3.8683399907313287,
+   "err_mean": 0.13898103292643627,
+   "err_max": 2.4654032156896655,
+   "err_min": -3.270131510024754e-06,
+   "err_p90": 0.3019882111618233
+  },
+  {
+   "method": "cut portals k=16, exact MMP labels + interp",
+   "build_s": 12.537749666000309,
+   "index_bytes": 816020,
+   "query_us": 9.629170017433353,
+   "err_mean": 0.059215682451819074,
+   "err_max": 2.4654032156896655,
+   "err_min": -1.4598107751813028,
+   "err_p90": 0.18929491071129534
+  },
+  {
+   "method": "cut portals k=16, exact MMP labels + model interp",
+   "build_s": 12.537749666000309,
+   "index_bytes": 816020,
+   "query_us": 24.57500006130431,
+   "err_mean": 0.052097748705543956,
+   "err_max": 2.4654032156896655,
+   "err_min": -0.1696350581647521,
+   "err_p90": 0.12079668187815035
+  },
+  {
+   "method": "cut portals k=16, exact MMP labels + model interp, A2A snap",
+   "build_s": 12.537749666000309,
+   "index_bytes": 816020,
+   "query_us": 353.3841700118501,
+   "err_mean": 1.7686917210189481,
+   "err_max": 20.315746940459146,
+   "err_min": 0.0,
+   "err_p90": 3.8308224914094033,
+   "abs_err_mean": 1.7686917210189481
+  },
+  {
+   "method": "cut portals k=16, exact MMP labels + model interp, A2A interp",
+   "build_s": 12.537749666000309,
+   "index_bytes": 816020,
+   "query_us": 359.95999998704065,
+   "err_mean": 0.198152891555463,
+   "err_max": 3.4745949992548875,
+   "err_min": -0.0715696759637674,
+   "err_p90": 0.4681896852056356,
+   "abs_err_mean": 0.2015718170404016
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels",
+   "build_s": 19.65071687499585,
+   "index_bytes": 1136660,
+   "query_us": 3.5529099841369316,
+   "err_mean": 0.044602276689272635,
+   "err_max": 0.8577499155596913,
+   "err_min": -3.270131510024754e-06,
+   "err_p90": 0.1219709632379318
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels + interp",
+   "build_s": 19.65071687499585,
+   "index_bytes": 1136660,
+   "query_us": 8.977909965324216,
+   "err_mean": 0.02904171750097162,
+   "err_max": 0.8281506473810873,
+   "err_min": -0.036489277415219235,
+   "err_p90": 0.07117104657478285
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels + model interp",
+   "build_s": 19.65071687499585,
+   "index_bytes": 1136660,
+   "query_us": 22.38875000330154,
+   "err_mean": 0.007713978805795607,
+   "err_max": 0.11360002387943435,
+   "err_min": -0.06753277042500505,
+   "err_p90": 0.035490638458259935
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels + model interp, A2A snap",
+   "build_s": 19.65071687499585,
+   "index_bytes": 1136660,
+   "query_us": 298.1983299832791,
+   "err_mean": 1.7355507605020275,
+   "err_max": 20.315746940459146,
+   "err_min": 0.0,
+   "err_p90": 3.923780849549248,
+   "abs_err_mean": 1.7355507605020275
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels + model interp, A2A interp",
+   "build_s": 19.65071687499585,
+   "index_bytes": 1136660,
+   "query_us": 285.0287500041304,
+   "err_mean": 0.16858250086894488,
+   "err_max": 3.636037979167983,
+   "err_min": -0.0773159827802794,
+   "err_p90": 0.36340431995379074,
+   "abs_err_mean": 0.17212080423615495
+  },
+  {
+   "method": "cut portals k=64, exact MMP labels",
+   "build_s": 32.447283084002265,
+   "index_bytes": 1777940,
+   "query_us": 3.337500020279549,
+   "err_mean": 0.00912504497349198,
+   "err_max": 0.15797407125428542,
+   "err_min": -3.270131510024754e-06,
+   "err_p90": 0.015648146334386073
+  },
+  {
+   "method": "cut portals k=64, exact MMP labels + interp",
+   "build_s": 32.447283084002265,
+   "index_bytes": 1777940,
+   "query_us": 8.47625000460539,
+   "err_mean": 0.0010328843610074578,
+   "err_max": 0.06066725348736757,
+   "err_min": -0.12463205910374642,
+   "err_p90": 0.007871742871732323
+  },
+  {
+   "method": "cut portals k=64, exact MMP labels + model interp",
+   "build_s": 32.447283084002265,
+   "index_bytes": 1777940,
+   "query_us": 16.335830005118623,
+   "err_mean": 0.002196714710485992,
+   "err_max": 0.032055802227937136,
+   "err_min": -0.013088799462768197,
+   "err_p90": 0.007887601440248483
+  },
+  {
+   "method": "cut portals k=64, exact MMP labels + model interp, A2A snap",
+   "build_s": 32.447283084002265,
+   "index_bytes": 1777940,
+   "query_us": 242.33374999312218,
+   "err_mean": 1.7234487327634278,
+   "err_max": 20.315746940459146,
+   "err_min": 0.0,
+   "err_p90": 3.8898934176500166,
+   "abs_err_mean": 1.7234487327634278
+  },
+  {
+   "method": "cut portals k=64, exact MMP labels + model interp, A2A interp",
+   "build_s": 32.447283084002265,
+   "index_bytes": 1777940,
+   "query_us": 260.05667001300026,
+   "err_mean": 0.14889757551985416,
+   "err_max": 3.479099587087453,
+   "err_min": -0.07285614151064657,
+   "err_p90": 0.3416731890068659,
+   "abs_err_mean": 0.15393332137249838
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels, k~|cut|",
+   "build_s": 8.710233042002073,
+   "index_bytes": 849948,
+   "query_us": 3.309580060886219,
+   "err_mean": 0.06761253132069678,
+   "err_max": 0.8577499155596913,
+   "err_min": -3.270131510024754e-06,
+   "err_p90": 0.1495346370365725
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels, k~|cut| + interp",
+   "build_s": 8.710233042002073,
+   "index_bytes": 849948,
+   "query_us": 8.413750038016587,
+   "err_mean": 0.03666909020069875,
+   "err_max": 0.8281506473810873,
+   "err_min": -0.3563772706275503,
+   "err_p90": 0.08625140371256945
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels, k~|cut| + model interp",
+   "build_s": 8.710233042002073,
+   "index_bytes": 849948,
+   "query_us": 21.729580039391294,
+   "err_mean": 0.016016597575731706,
+   "err_max": 0.3933258801601669,
+   "err_min": -0.06753277042500505,
+   "err_p90": 0.04760043780482449
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels, k~|cut| + model interp, A2A snap",
+   "build_s": 8.710233042002073,
+   "index_bytes": 849948,
+   "query_us": 273.42415996827185,
+   "err_mean": 1.7454962644842449,
+   "err_max": 20.315746940459146,
+   "err_min": 0.0,
+   "err_p90": 3.884169674651841,
+   "abs_err_mean": 1.7454962644842449
+  },
+  {
+   "method": "cut portals k=32, exact MMP labels, k~|cut| + model interp, A2A interp",
+   "build_s": 8.710233042002073,
+   "index_bytes": 849948,
+   "query_us": 339.2220800014911,
+   "err_mean": 0.17062120206006026,
+   "err_max": 3.4727905535616665,
+   "err_min": -0.0773159827802794,
+   "err_p90": 0.3678719532020414,
+   "abs_err_mean": 0.17415950542727032
+  }
+ ]
+}
