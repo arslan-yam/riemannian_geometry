@@ -108,26 +108,22 @@ public:
 
 				if ((!interval_list_0(e)->start_vertex()) || (!interval_list_1(e)->start_vertex()))
 				{
-					std::cout << "list link error" << std::endl;
-					exit(1);
+					throw std::runtime_error("VTP: inconsistent window list links (mesh orientation / degeneracy)"); // was: print + exit(1)
 				}
 
 				if (interval_list_0(e)->start_vertex() == interval_list_1(e)->start_vertex())
 				{
-					std::cout << "list link error" << std::endl;
-					exit(1);
+					throw std::runtime_error("VTP: inconsistent window list links (mesh orientation / degeneracy)"); // was: print + exit(1)
 				}
 
 				if (!((e->belongs(interval_list_0(e)->start_vertex())) && (e->belongs(interval_list_1(e)->start_vertex()))))
 				{
-					std::cout << "list link error" << std::endl;
-					exit(1);
+					throw std::runtime_error("VTP: inconsistent window list links (mesh orientation / degeneracy)"); // was: print + exit(1)
 				}
 			}
 			if ((v[0] == v[1]) || (v[0] == v[2]) || (v[1] == v[2]))
 			{
-				std::cout << "list link error" << std::endl;
-				exit(1);
+				throw std::runtime_error("VTP: inconsistent window list links (mesh orientation / degeneracy)"); // was: print + exit(1)
 			}
 		}
 	};

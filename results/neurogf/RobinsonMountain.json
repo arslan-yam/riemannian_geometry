@@ -1,0 +1,18 @@
+{
+ "method": "NeuroGF (distance branch)",
+ "mesh": "RobinsonMountain",
+ "n": 3696,
+ "sources": 512,
+ "epochs": 30,
+ "iters": 100,
+ "build_s": 1401.0818013740936,
+ "data_s": 29.55180991603993,
+ "train_s": 1371.5299914580537,
+ "index_MB": 0.251392,
+ "query_us": 260.1230532551805,
+ "query_us_batch": 15.350666673233112,
+ "err_mean": 0.6673449665986262,
+ "err_signed_mean": 0.23850330686258642,
+ "err_max": 10.257267931795088,
+ "err_p99": 3.200070834615216
+}

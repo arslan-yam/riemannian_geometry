@@ -35,7 +35,7 @@ CertifiedIndex::CertifiedIndex(const Terrain& t, const Options& o) : T(t), opt(o
         ucoord[k].erase(std::unique(ucoord[k].begin(), ucoord[k].end()), ucoord[k].end());
     }
     timing["setup"] = secs(t0);
-    t0 = clk::now(); build_tree(); timing["tree"] = secs(t0);
+    t0 = clk::now(); if (opt.hierarchy == "shifted") build_shifted(); else build_tree(); timing["tree"] = secs(t0);
     t0 = clk::now(); cut_geometry(); timing["cut_geometry"] = secs(t0);
     t0 = clk::now(); labels_phase(); timing["labels"] = secs(t0);
     t0 = clk::now(); near_phase(); timing["near_tables"] = secs(t0);
@@ -122,6 +122,84 @@ void CertifiedIndex::build_tree() {
         for (int k = 0; k < D; ++k) { anc[(size_t)u * D + k] = ancF[(size_t)u * maxd + k]; row[(size_t)u * D + k] = rowF[(size_t)u * maxd + k]; }
 }
 
+// ---------------------------------------------------------------- shifted hierarchy
+// copies regular quadtrees, copy j shifted by j/3 of the top cell (2-d shifting lemma: any two points at
+// L-inf distance r share a cell of side <= 6r in one copy). A cell is a leaf when its diagonal is <= R
+// or it holds one vertex. Each cell gets its vertical / horizontal split line as a cut, but only if it
+// has members on both sides of it. The grid is offset by a tiny irrational amount so no vertex lies on
+// any line.
+void CertifiedIndex::build_shifted() {
+    const int n = T.n, maxd = 48, ncopy = std::max(1, opt.copies);
+    double E = std::max(T.hi[0] - T.lo[0], T.hi[1] - T.lo[1]);
+    double S0 = E * ncopy * (1 + 1e-9) + 1e-6;   // copy j covers [o_j, o_j + S0] with o_j = lo - j S0 / ncopy
+    std::vector<int> all(n);
+    std::iota(all.begin(), all.end(), 0);
+    copies.assign(ncopy, ShiftCopy());
+    for (int j = 0; j < ncopy; ++j) {
+        ShiftCopy& Cp = copies[j];
+        // origin with a tiny irrational offset; retried until no vertex is within 1e-9 edges of a line
+        double off = 0.6180339887 * 1e-4 * T.edge * (j + 1);
+        double org[2];
+        for (int attempt = 0; attempt < 20; ++attempt, off *= 1.37) {
+            for (int k = 0; k < 2; ++k) org[k] = T.lo[k] - j * S0 / ncopy - off;
+            bool clash = false;
+            for (int lev = 0; lev < maxd && !clash; ++lev) {
+                double Sl = S0 / std::ldexp(1.0, lev);
+                if (Sl < 0.5 * Rn) break;
+                for (int i = 0; i < n && !clash; ++i)
+                    for (int k = 0; k < 2; ++k) {
+                        double f = (T.xy[2 * i + k] - org[k]) / Sl;
+                        if (std::fabs(f - std::round(f)) * Sl < 1e-9 * std::max(1.0, T.edge)) { clash = true; break; }
+                    }
+            }
+            if (!clash) break;
+        }
+        std::vector<int32_t> ancF((size_t)n * maxd, -1), rowF((size_t)n * maxd, -1);
+        Cp.depth_of.assign(n, 0);
+        struct Item { std::vector<int> M; int depth; double x0, y0, S; };
+        std::vector<Item> stack{{all, 0, org[0], org[1], S0}};
+        int maxdepth = 0;
+        while (!stack.empty()) {
+            Item it = std::move(stack.back());
+            stack.pop_back();
+            const auto& M = it.M;
+            int depth = it.depth;
+            int node = (int)Cp.nodes.size();
+            ShiftNode N;
+            N.side = it.S; N.mid[0] = it.x0 + it.S / 2; N.mid[1] = it.y0 + it.S / 2;
+            for (size_t r = 0; r < M.size(); ++r) { ancF[(size_t)M[r] * maxd + depth] = node; rowF[(size_t)M[r] * maxd + depth] = (int32_t)r; }
+            for (int u : M) Cp.depth_of[u] = depth;
+            maxdepth = std::max(maxdepth, depth);
+            bool leaf = M.size() <= 1 || it.S * std::sqrt(2.0) <= Rn || depth + 1 >= maxd;
+            if (!leaf) {
+                double lo[2] = {INF, INF}, hi[2] = {-INF, -INF};
+                for (int u : M) for (int k = 0; k < 2; ++k) { lo[k] = std::min(lo[k], T.xy[2 * u + k]); hi[k] = std::max(hi[k], T.xy[2 * u + k]); }
+                for (int a = 0; a < 2; ++a) {
+                    if (!(lo[a] < N.mid[a] && N.mid[a] < hi[a])) continue; // nobody on one side: no pair split here
+                    Cut C;
+                    C.axis = a; C.v = N.mid[a]; C.depth = depth; C.M = M; C.cell_side = it.S;
+                    for (int k = 0; k < 2; ++k) { C.lo[k] = lo[k]; C.hi[k] = hi[k]; }
+                    N.cut[a] = (int)cuts.size();
+                    cuts.push_back(std::move(C));
+                }
+                std::vector<int> Q[4];
+                for (int u : M) Q[(T.xy[2 * u] > N.mid[0] ? 1 : 0) + (T.xy[2 * u + 1] > N.mid[1] ? 2 : 0)].push_back(u);
+                double h = it.S / 2;
+                for (int q = 3; q >= 0; --q)
+                    if (!Q[q].empty()) stack.push_back({Q[q], depth + 1, it.x0 + (q & 1 ? h : 0), it.y0 + (q & 2 ? h : 0), h});
+            } else if (j == 0) {
+                leaves.push_back(M);
+            }
+            Cp.nodes.push_back(N);
+        }
+        Cp.D = maxdepth + 1;
+        Cp.anc.assign((size_t)n * Cp.D, -1); Cp.row.assign((size_t)n * Cp.D, -1);
+        for (int u = 0; u < n; ++u)
+            for (int k = 0; k < Cp.D; ++k) { Cp.anc[(size_t)u * Cp.D + k] = ancF[(size_t)u * maxd + k]; Cp.row[(size_t)u * Cp.D + k] = rowF[(size_t)u * maxd + k]; }
+    }
+    depth_of = copies[0].depth_of;
+}
+
 // ---------------------------------------------------------------- cut lines
 std::vector<Run> CertifiedIndex::line_pieces(int a, double v, double lo, double hi) const {
     int b = 1 - a;
@@ -170,7 +248,7 @@ std::vector<Run> CertifiedIndex::line_pieces(int a, double v, double lo, double 
     return runs;
 }
 
-std::vector<double> CertifiedIndex::place(const Run& R, double r_lo, double r_hi) const {
+std::vector<double> CertifiedIndex::place(const Run& R, double r_lo, double r_hi, double g) const {
     const auto &ub = R.ub, &ab = R.ab;
     double U0 = ub.front(), U1 = ub.back();
     auto arc = [&](double u) { return interp1(u, ub, ab); };
@@ -236,9 +314,19 @@ void CertifiedIndex::cut_geometry() {
         double off = mu / lam;
         double wlo = std::max(r_lo - off, T.lo[b]), whi = std::min(r_hi + off, T.hi[b]);
         C.runs = line_pieces(a, C.v, wlo, whi);
+        // the gap inside the box: fixed g; capped at k_max portals (version A: the arc of the box part over
+        // k_max); or scale-dependent max(g, eps lam S / 6) on the shifted hierarchy (set with cell_side)
+        double in_box = 0;
+        for (auto& R : C.runs) {
+            double rl = std::max(R.ub.front(), r_lo), rh = std::min(R.ub.back(), r_hi);
+            if (rh > rl) in_box += interp1(rh, R.ub, R.ab) - interp1(rl, R.ub, R.ab);
+        }
+        C.gap_box = g;
+        if (opt.k_max > 0) C.gap_box = std::max(g, in_box / opt.k_max);
+        if (C.cell_side > 0) C.gap_box = std::max(g, eps * lam * C.cell_side / 6.0);
         C.pos.clear(); C.arc.clear(); C.run.clear();
         for (size_t r = 0; r < C.runs.size(); ++r) {
-            auto p = place(C.runs[r], r_lo, r_hi);
+            auto p = place(C.runs[r], r_lo, r_hi, C.gap_box);
             for (double x : p) { C.pos.push_back(x); C.arc.push_back(interp1(x, C.runs[r].ub, C.runs[r].ab)); C.run.push_back((int64_t)r); }
         }
         int K = C.K();
@@ -324,6 +412,12 @@ void CertifiedIndex::submesh(const std::vector<int>& faces, const std::vector<do
             tri.insert(tri.end(), {B, C, p, C, A, p}); // (B, C, p), (C, A, p)
         }
         F2.insert(F2.end(), tri.begin(), tri.end());
+    }
+    // one orientation for every triangle (counter-clockwise in the chart): VTP's window lists need
+    // consistently oriented faces and abort otherwise; distances do not depend on it
+    for (size_t t = 0; t < F2.size(); t += 3) {
+        const double *A = &V2[3 * F2[t]], *B = &V2[3 * F2[t + 1]], *C = &V2[3 * F2[t + 2]];
+        if ((B[0] - A[0]) * (C[1] - A[1]) - (C[0] - A[0]) * (B[1] - A[1]) < 0) std::swap(F2[t + 1], F2[t + 2]);
     }
 }
 
@@ -416,7 +510,8 @@ void CertifiedIndex::labels_phase() {
             size_t nbox = grid.in_box(blo[0], bhi[0], blo[1], bhi[1]).size();
             vtp = faces.size() <= opt.hybrid_ratio * nbox;
         }
-        std::unique_ptr<Solver> sol(vtp ? make_vtp(V2, F2) : make_mmp(V2, F2, true));
+        std::unique_ptr<Solver> sol(vtp ? make_vtp(V2, F2) : nullptr);
+        if (!sol) { vtp = false; sol.reset(make_mmp(V2, F2, true)); } // VTP rejected the sub-mesh: MMP
         C.used_vtp = vtp;
         std::vector<float> Lc(nm * K, std::numeric_limits<float>::infinity());
         out.resize(nm);
@@ -566,59 +661,270 @@ double CertifiedIndex::interp(const Cut& C, const double* f, int K, int i, int r
     return std::max(fv, y[1] - cap);
 }
 
-void CertifiedIndex::bounds(int s, int t, double* out) const {
-    if (s == t) { out[0] = out[1] = out[2] = 0; return; }
+// the cut that answers (s, t): the deepest common ancestor cut (kd), or on the shifted hierarchy the
+// copy whose common cell is smallest and that cell's line separating s and t
+bool CertifiedIndex::select_cut(int s, int t, int& cid, int& rs, int& rt) const {
+    if (copies.empty()) {
+        const int32_t *as = &anc[(size_t)s * D], *at = &anc[(size_t)t * D];
+        int k = -1;
+        for (int j = 0; j < D; ++j) if (as[j] != at[j]) { k = j; break; }
+        if (k < 0) k = std::min(depth_of[s], depth_of[t]);
+        if (k <= 0) return false;
+        cid = as[k - 1]; rs = row[(size_t)s * D + k - 1]; rt = row[(size_t)t * D + k - 1];
+        return cid >= 0;
+    }
+    double best = INF;
+    cid = -1;
+    for (const auto& Cp : copies) {
+        const int32_t *as = &Cp.anc[(size_t)s * Cp.D], *at = &Cp.anc[(size_t)t * Cp.D];
+        int k = -1;
+        for (int j = 0; j < Cp.D; ++j) if (as[j] != at[j]) { k = j; break; }
+        if (k <= 0) continue; // same leaf in this copy (a near pair) or different roots (cannot happen)
+        const ShiftNode& N = Cp.nodes[as[k - 1]];
+        if (N.side >= best) continue;
+        int a = ((T.xy[2 * s] > N.mid[0]) != (T.xy[2 * t] > N.mid[0])) ? 0 : 1;
+        if (N.cut[a] < 0) continue;
+        best = N.side; cid = N.cut[a];
+        rs = Cp.row[(size_t)s * Cp.D + k - 1]; rt = Cp.row[(size_t)t * Cp.D + k - 1];
+    }
+    return cid >= 0;
+}
+
+// LB, UB and estimate from one cut. f = s-row + t-row (dense, decoded 16-bit, or reconstructed from
+// covers: upper reconstruction for UB and the estimate, lower reconstruction for the interval LB);
+// each LB term subtracts the per-label error bound of the storage
+void CertifiedIndex::eval_cut(const Cut& C, int s, int t, int rs, int rt, double* out) const {
     auto chord = [&]() {
         const double *A = &T.V[3 * s], *B = &T.V[3 * t];
         return lam * std::sqrt(std::pow(A[0] - B[0], 2) + std::pow(A[1] - B[1], 2) + std::pow(A[2] - B[2], 2));
     };
+    int K = C.K();
+    thread_local std::vector<double> f, fl, err, a1, a2;
+    f.resize(std::max(K, 1)); fl.resize(std::max(K, 1)); err.assign(std::max(K, 1), 0.0);
+    double* flo = f.data(); // lower f for the LB terms (same array unless covers)
+    if (storage == DENSE || (storage == CODE16 && C.Lq.empty()) || (storage == CODE8 && C.Lq8.empty()) || (storage == COVER && C.cov_ptr.empty())) {
+        const float *Ls = &C.L[(size_t)rs * K], *Lt = &C.L[(size_t)rt * K];
+        for (int j = 0; j < K; ++j) f[j] = (double)Ls[j] + (double)Lt[j];
+    } else if (storage == CODE8) {
+        const int8_t *Qs = &C.Lq8[(size_t)rs * K], *Qt = &C.Lq8[(size_t)rt * K];
+        const float *As = &C.La[(size_t)rs * C.n_anchor], *At = &C.La[(size_t)rt * C.n_anchor];
+        double ds = 0, dt = 0;
+        int slot = 0;
+        for (int j = 0; j < K; ++j) {
+            if (j == 0 || C.run[j] != C.run[j - 1]) { ds = As[slot]; dt = At[slot]; ++slot; }
+            else { ds += Qs[j] * C.qstep[j]; dt += Qt[j] * C.qstep[j]; }
+            f[j] = ds + dt;
+            err[j] = 2 * C.qerr[j];
+        }
+    } else if (storage == CODE16) {
+        const int16_t *Qs = &C.Lq[(size_t)rs * K], *Qt = &C.Lq[(size_t)rt * K];
+        const float *As = &C.La[(size_t)rs * C.n_anchor], *At = &C.La[(size_t)rt * C.n_anchor];
+        double ds = 0, dt = 0;
+        int slot = 0;
+        for (int j = 0; j < K; ++j) {
+            if (j == 0 || C.run[j] != C.run[j - 1]) { ds = As[slot]; dt = At[slot]; ++slot; }
+            else { ds += Qs[j] * C.qstep[j]; dt += Qt[j] * C.qstep[j]; }
+            f[j] = ds + dt;
+            err[j] = 2 * C.qerr[j];
+        }
+    } else { // covers
+        auto recon = [&](int r, std::vector<double>& up, std::vector<double>& lo) {
+            up.assign(K, INF); lo.assign(K, -INF);
+            int b = C.cov_ptr[r], e = C.cov_ptr[r + 1];
+            // forward and backward passes along each run: up = min_q l_q + |A - A_q|, lo = max_q l_q - |A - A_q|
+            double cu = INF, cl = -INF; int c = b;
+            for (int j = 0; j < K; ++j) {
+                if (j > 0 && C.run[j] == C.run[j - 1]) { double dA = C.arc[j] - C.arc[j - 1]; cu += dA; cl -= dA; }
+                else { cu = INF; cl = -INF; }
+                while (c < e && C.cov_idx[c] < j) ++c;
+                if (c < e && C.cov_idx[c] == j) { cu = std::min(cu, (double)C.cov_val[c]); cl = std::max(cl, (double)C.cov_val[c]); }
+                up[j] = std::min(up[j], cu); lo[j] = std::max(lo[j], cl);
+            }
+            cu = INF; cl = -INF; c = e - 1;
+            for (int j = K - 1; j >= 0; --j) {
+                if (j < K - 1 && C.run[j] == C.run[j + 1]) { double dA = C.arc[j + 1] - C.arc[j]; cu += dA; cl -= dA; }
+                else { cu = INF; cl = -INF; }
+                while (c >= b && C.cov_idx[c] > j) --c;
+                if (c >= b && C.cov_idx[c] == j) { cu = std::min(cu, (double)C.cov_val[c]); cl = std::max(cl, (double)C.cov_val[c]); }
+                up[j] = std::min(up[j], cu); lo[j] = std::max(lo[j], cl);
+            }
+        };
+        thread_local std::vector<double> us, ls_, ut, lt;
+        recon(rs, us, ls_); recon(rt, ut, lt);
+        for (int j = 0; j < K; ++j) { f[j] = us[j] + ut[j]; fl[j] = ls_[j] + lt[j]; }
+        flo = fl.data();
+    }
+    double ub = INF, lb = INF;
+    int imin = 0;
+    bool use_lb = exact && C.lb_ok;
+    for (int j = 0; j < K; ++j) {
+        if (f[j] < ub) { ub = f[j]; imin = j; }
+        if (use_lb && j > 0 && std::isfinite(C.gap[j - 1]))
+            lb = std::min(lb, 0.5 * (flo[j - 1] + flo[j]) - C.gap[j - 1] - 0.5 * (err[j - 1] + err[j]));
+    }
+    if (use_lb) for (size_t e = 0; e < C.end_idx.size(); ++e) lb = std::min(lb, flo[C.end_idx[e]] - C.end_gap[e] - err[C.end_idx[e]]);
+    if (!use_lb || !std::isfinite(lb)) lb = 0;
+    lb *= 1.0 - 2 * F32_REL;
+    lb = std::max(lb, chord());
+    double est = ub;
+    if (opt.interp) {
+        if (storage == CODE8 || storage == CODE16) {
+            // coded labels sit above the stored ones by half a quantum on average: the estimate (not the
+            // bounds) is taken from the de-biased values
+            thread_local std::vector<double> fe;
+            fe.resize(std::max(K, 1));
+            int ie = 0;
+            for (int j = 0; j < K; ++j) { fe[j] = f[j] - 0.5 * err[j]; if (fe[j] < fe[ie]) ie = j; }
+            est = interp(C, fe.data(), K, ie, rs, rt);
+        } else {
+            est = interp(C, f.data(), K, imin, rs, rt);
+        }
+    }
+    out[0] = lb; out[1] = ub; out[2] = std::min(std::max(est, lb), ub);
+}
+
+void CertifiedIndex::bounds(int s, int t, double* out) const {
+    if (s == t) { out[0] = out[1] = out[2] = 0; return; }
     double dx = T.xy[2 * s] - T.xy[2 * t], dy = T.xy[2 * s + 1] - T.xy[2 * t + 1];
     if (dx * dx + dy * dy <= Rq * Rq) {
         auto b0 = near_ids.begin() + near_ptr[s], b1 = near_ids.begin() + near_ptr[s + 1];
         auto it = std::lower_bound(b0, b1, t);
         if (it != b1 && *it == t) {
             double d = near_d[it - near_ids.begin()];
-            out[0] = exact ? d * (1.0 - F32_REL) : chord();
+            const double *A = &T.V[3 * s], *B = &T.V[3 * t];
+            out[0] = exact ? d * (1.0 - F32_REL) : lam * std::sqrt(std::pow(A[0] - B[0], 2) + std::pow(A[1] - B[1], 2) + std::pow(A[2] - B[2], 2));
             out[1] = out[2] = d;
             return;
         }
     }
-    const int32_t *as = &anc[(size_t)s * D], *at = &anc[(size_t)t * D];
-    int k = -1;
-    for (int j = 0; j < D; ++j) if (as[j] != at[j]) { k = j; break; }
-    if (k < 0) k = std::min(depth_of[s], depth_of[t]);
-    int cid = as[k - 1], rs = row[(size_t)s * D + k - 1], rt = row[(size_t)t * D + k - 1];
-    const Cut& C = cuts[cid];
-    int K = C.K();
-    thread_local std::vector<double> f;
-    f.resize(std::max(K, 1));
-    const float *Ls = &C.L[(size_t)rs * K], *Lt = &C.L[(size_t)rt * K];
-    double ub = INF, lb = INF;
-    int imin = 0;
-    bool use_lb = exact && C.lb_ok; // the interval bound needs exact labels
-    for (int j = 0; j < K; ++j) {
-        f[j] = (double)Ls[j] + (double)Lt[j];
-        if (f[j] < ub) { ub = f[j]; imin = j; }
-        if (use_lb && j > 0 && std::isfinite(C.gap[j - 1])) lb = std::min(lb, 0.5 * (f[j - 1] + f[j]) - C.gap[j - 1]);
+    int cid, rs, rt;
+    if (!select_cut(s, t, cid, rs, rt)) { out[0] = 0; out[1] = out[2] = INF; return; }
+    eval_cut(cuts[cid], s, t, rs, rt, out);
+}
+
+// exact distance of a pair: one early-stopping MMP sweep on the faces meeting bbox(s, t) dilated by
+// ub / (2 lambda) (the ellipse lemma: every path of length <= ub stays inside)
+double CertifiedIndex::exact_pair(int s, int t, double ub) const {
+    double R = ub / (2.0 * lam) + 1e-6 * T.edge;
+    double lo[2], hi[2];
+    for (int k = 0; k < 2; ++k) { lo[k] = std::min(T.xy[2 * s + k], T.xy[2 * t + k]) - R; hi[k] = std::max(T.xy[2 * s + k], T.xy[2 * t + k]) + R; }
+    std::vector<int> faces = grid.in_box(lo[0], hi[0], lo[1], hi[1]);
+    std::vector<double> V2, Xu; std::vector<unsigned> F2; std::vector<int> used, pidx;
+    double along[2] = {1, 0};
+    submesh(faces, {}, along, V2, F2, used, pidx, Xu);
+    auto loc = [&](int v) { return (unsigned)(std::lower_bound(used.begin(), used.end(), v) - used.begin()); };
+    std::unique_ptr<Solver> sol(make_mmp(V2, F2, true));
+    double d;
+    std::vector<unsigned> tg{loc(t)};
+    sol->dist(loc(s), tg, &d);
+    return d;
+}
+
+bool CertifiedIndex::bounds_refined(int s, int t, double* out) const {
+    bounds(s, t, out);
+    if (s == t || out[1] <= (1.0 + eps) * out[0]) return false;
+    if (!exact) return false; // weighted terrains: no exact solver
+    double d = exact_pair(s, t, std::isfinite(out[1]) ? out[1] : 4 * lam * std::hypot(T.xy[2 * s] - T.xy[2 * t], T.xy[2 * s + 1] - T.xy[2 * t + 1]) + 10 * T.edge);
+    out[0] = d * (1 - 1e-12); out[1] = d * (1 + 1e-12); out[2] = d;
+    return true;
+}
+
+// 16-bit coding: along a run, labels are 1-Lipschitz in arc length (the cut is a path), so the step to the
+// next label lies in [-(A_j + e_{j-1}), A_j] with e the previous decoding error. Each step is stored as
+// ceil(step / q_j) with q_j = (A_j + e_{j-1}) / 32767 (shared by all rows of the cut), decoded values are
+// re-used (closed loop), so every decoded label is >= the stored one and exceeds it by < q_j
+void CertifiedIndex::encode16(int bits) {
+    const double qmax = bits == 8 ? 127.0 : 32767.0, qmin = bits == 8 ? -128.0 : -32768.0;
+    for (auto& C : cuts) {
+        int K = C.K();
+        size_t nm = C.M.size();
+        if (K == 0) { C.Lq.clear(); C.La.clear(); continue; }
+        float Lmax = 0;
+        for (float x : C.L) if (std::isfinite(x)) Lmax = std::max(Lmax, x);
+        double ulp = std::ldexp((double)Lmax, -22); // a float32 anchor's error, generously
+        C.qstep.assign(K, 0.0); C.qerr.assign(K, ulp);
+        C.n_anchor = 0;
+        for (int j = 0; j < K; ++j) {
+            if (j == 0 || C.run[j] != C.run[j - 1]) { C.n_anchor++; continue; }
+            double A = C.arc[j] - C.arc[j - 1];
+            C.qstep[j] = (A * (1 + 1e-6) + C.qerr[j - 1] + 4 * ulp) / qmax;
+            C.qerr[j] = C.qstep[j];
+        }
+        if (bits == 8) { C.Lq8.assign(nm * K, 0); C.Lq.clear(); } else { C.Lq.assign(nm * K, 0); C.Lq8.clear(); }
+        C.La.assign(nm * C.n_anchor, 0.f);
+        bool ok = true;
+        for (size_t r = 0; r < nm && ok; ++r) {
+            const float* Lr = &C.L[r * K];
+            double dec = 0;
+            int slot = 0;
+            for (int j = 0; j < K; ++j) {
+                if (j == 0 || C.run[j] != C.run[j - 1]) {
+                    C.La[r * C.n_anchor + slot++] = Lr[j];
+                    dec = Lr[j];
+                } else {
+                    double q = std::ceil(((double)Lr[j] - dec) / C.qstep[j]);
+                    if (q < qmin || q > qmax || !std::isfinite(q)) { ok = false; break; } // cannot happen (1-Lipschitz rows)
+                    if (bits == 8) C.Lq8[r * K + j] = (int8_t)q; else C.Lq[r * K + j] = (int16_t)q;
+                    dec += q * C.qstep[j];
+                }
+            }
+        }
+        if (!ok) { C.Lq.clear(); C.Lq8.clear(); C.La.clear(); } // this cut stays dense
     }
-    if (use_lb) for (size_t e = 0; e < C.end_idx.size(); ++e) lb = std::min(lb, f[C.end_idx[e]] - C.end_gap[e]);
-    if (!use_lb || !std::isfinite(lb)) lb = 0;
-    lb *= 1.0 - 2 * F32_REL;
-    lb = std::max(lb, chord());
-    double est = opt.interp ? interp(C, f.data(), K, imin, rs, rt) : ub;
-    out[0] = lb; out[1] = ub; out[2] = std::min(std::max(est, lb), ub);
+}
+
+// eps_c-covers: per row keep a subset Q of portals such that every portal p of the same run has some q
+// in Q with l(q) + A(q, p) <= (1 + eps_c) l(p). Greedy outwards from each run's minimum (valid for any
+// row; near-minimal for the V-shaped rows of a terrain)
+void CertifiedIndex::build_covers(double eps_c) {
+    cover_eps = eps_c;
+    cover_entries = 0;
+    for (auto& C : cuts) {
+        int K = C.K();
+        size_t nm = C.M.size();
+        C.cov_ptr.assign(nm + 1, 0); C.cov_idx.clear(); C.cov_val.clear();
+        std::vector<char> keep(K);
+        for (size_t r = 0; r < nm; ++r) {
+            const float* Lr = &C.L[r * K];
+            std::fill(keep.begin(), keep.end(), 0);
+            int b = 0;
+            while (b < K) {
+                int e = b;
+                while (e + 1 < K && C.run[e + 1] == C.run[b]) ++e;
+                int m = b;
+                for (int j = b; j <= e; ++j) if (Lr[j] < Lr[m]) m = j;
+                keep[m] = 1;
+                double c = (double)Lr[m] - C.arc[m]; // best l_q - A_q of kept portals left of j (going right)
+                for (int j = m + 1; j <= e; ++j) {
+                    if ((1 + eps_c) * Lr[j] < c + C.arc[j]) { keep[j] = 1; c = std::min(c, (double)Lr[j] - C.arc[j]); }
+                }
+                c = (double)Lr[m] + C.arc[m];       // best l_q + A_q going left
+                for (int j = m - 1; j >= b; --j) {
+                    if ((1 + eps_c) * Lr[j] < c - C.arc[j]) { keep[j] = 1; c = std::min(c, (double)Lr[j] + C.arc[j]); }
+                }
+                b = e + 1;
+            }
+            for (int j = 0; j < K; ++j) if (keep[j]) { C.cov_idx.push_back((uint16_t)j); C.cov_val.push_back(Lr[j]); }
+            C.cov_ptr[r + 1] = (int32_t)C.cov_idx.size();
+        }
+        cover_entries += (int64_t)C.cov_idx.size();
+    }
 }
 
 size_t CertifiedIndex::nbytes() const {
     size_t b = 0;
     for (auto& C : cuts) {
-        b += C.L.size() * 4;
+        if (storage == CODE16 && !C.Lq.empty()) b += C.Lq.size() * 2 + C.La.size() * 4 + C.qstep.size() * 8;
+        else if (storage == CODE8 && !C.Lq8.empty()) b += C.Lq8.size() + C.La.size() * 4 + C.qstep.size() * 8;
+        else if (storage == COVER && !C.cov_ptr.empty()) b += C.cov_idx.size() * 6 + C.cov_ptr.size() * 4;
+        else b += C.L.size() * 4;
         b += C.arc.size() * 8 + C.run.size() * 8 + C.gap.size() * 8 + C.X.size() * 8;
         b += C.end_idx.size() * 16 + 1;
         b += C.foot_r.size() * 4 + C.foot_arc.size() * 4 + C.foot_run.size() * 2;
     }
     b += near_ids.size() * 4 + near_d.size() * 4 + near_ptr.size() * 8;
     b += anc.size() * 4 + row.size() * 4;
+    for (auto& Cp : copies) b += Cp.anc.size() * 4 + Cp.row.size() * 4 + Cp.nodes.size() * sizeof(ShiftNode);
     return b;
 }
 

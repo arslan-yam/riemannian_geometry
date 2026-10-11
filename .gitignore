@@ -234,3 +234,8 @@ data/terrains/large/
 results/logs/
 notebooks/_tmp*.ipynb
 external/
+cpp/bin/
+results/dgg/*.binary
+results/dgg/*.off
+results/dgg/dist_*.txt
+rgeo/**/_c*.so

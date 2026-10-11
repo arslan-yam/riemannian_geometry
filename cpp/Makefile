@@ -6,7 +6,7 @@ VTPI = -Ithird_party/vtp
 BIN = bin
 OBJ = $(BIN)/obj
 
-all: $(BIN)/solver_check $(BIN)/cci_bench
+all: $(BIN)/solver_check $(BIN)/cci_bench $(BIN)/cci_exp
 
 # competitors (their code, not part of `all`): the UP-Oracle authors' oracles behind a static driver
 UPO ?= ../external/UpdatedStructureTerrainCode/src
@@ -24,6 +24,9 @@ $(BIN)/solver_check: tools/solver_check.cpp $(OBJ)/solver_mmp.o $(OBJ)/solver_vt
 $(OBJ)/certified.o: src/certified.cpp src/certified.h src/terrain.h src/graph.h src/solver.h
 	@mkdir -p $(OBJ); $(CXX) $(CXXFLAGS) -c $< -o $@
 $(BIN)/cci_bench: tools/cci_bench.cpp $(OBJ)/certified.o $(OBJ)/solver_mmp.o $(OBJ)/solver_vtp.o src/mesh_io.h
+	$(CXX) $(CXXFLAGS) $< $(OBJ)/certified.o $(OBJ)/solver_mmp.o $(OBJ)/solver_vtp.o -o $@
+
+$(BIN)/cci_exp: tools/cci_exp.cpp $(OBJ)/certified.o $(OBJ)/solver_mmp.o $(OBJ)/solver_vtp.o src/mesh_io.h
 	$(CXX) $(CXXFLAGS) $< $(OBJ)/certified.o $(OBJ)/solver_mmp.o $(OBJ)/solver_vtp.o -o $@
 
 clean:

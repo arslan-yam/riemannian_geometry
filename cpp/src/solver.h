@@ -16,7 +16,7 @@ struct Solver {
 // distance bound); the distances are identical to a full sweep
 Solver* make_mmp(const std::vector<double>& V, const std::vector<unsigned>& F, bool early_stop);
 // VTP sweeps the whole (sub-)mesh: its vertex queue does not make a popped vertex final, so there
-// is no exact early stop
+// is no exact early stop. Returns nullptr if VTP's own mesh checks reject the mesh
 Solver* make_vtp(const std::vector<double>& V, const std::vector<unsigned>& F);
 
 }  // namespace cci

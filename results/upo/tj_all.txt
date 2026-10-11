@@ -1,0 +1,8 @@
+mesh has 576 vertices, 1058 faces, 1633 edges
+mesh ../../external/UpdatedStructureTerrainCode/input/TJpre_1058.off vertices 576 faces 1058 POIs 576 eps 0.1 queries 200
+RESULT UP-Oracle  build    14985.4 ms  size     9.853 MB  query     0.2929 ms  err mean 1.3410% max 7.8555% min -0.0000%
+RESULT WSPD-Oracle build     5070.0 ms  size   125.522 MB  query     0.0052 ms  err mean 0.1427% max 8.6952% min 0.0000%
+RESULT RC-Oracle  build     4732.2 ms  size   112.970 MB  query     0.0063 ms  err mean 0.1427% max 8.6952% min 0.0000%
+RESULT EAR-Oracle build     5634.0 ms  size    48.060 MB  query    12.7003 ms  err mean 0.0371% max 2.2849% min 0.0000%
+RESULT WAV-Fly    build        0.0 ms  size     0.000 MB  query     4.7987 ms  err mean 0.0000% max 0.0000% min 0.0000%
+RESULT ESP-Fly    build        0.0 ms  size     0.000 MB  query     8.3152 ms  err mean 0.2962% max 1.0232% min 0.0000%

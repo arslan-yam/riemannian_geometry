@@ -73,7 +73,17 @@ notes/
 tests/test_core.py          invariants: H2H = Dijkstra, upper bounds, exact walk, gradients, MMP labels,
                             exact obstacle test, face grid, Steiner insertion, certified bounds,
                             compiled query = Python query, Steiner labels admissible
-external/                   (gitignored) the competitors' harness, cloned and built here
+cpp/                        C++ implementation of the certified index (`make` -> cpp/bin/):
+  src/certified.{h,cpp}     the index (same construction and query as certified.py)
+  src/solver_{mmp,vtp}.cpp  exact solvers: Kirsanov's MMP (early stop) and VTP (Qin et al. 2016)
+  src/terrain.h, graph.h    mesh, face / vertex grids, face walk, mesh graph + Dijkstra
+  tools/cci_bench.cpp       build + evaluate on vertex pairs against exact MMP
+  tools/solver_check.cpp    MMP vs VTP: exactness and speed
+  tools/upo_static.cpp      the UP-Oracle authors' oracles behind a static many-query driver
+  tools/dgg_bench.cpp       DGG (discrete geodesic graph) queries on a precomputed graph
+  third_party/              Kirsanov MMP (MIT, via pygeodesic), VTP (MIT)
+external/                   (gitignored) competitors' code: EAR harness, UP-Oracle, VTP, DGG (+ macOS
+                            port in dgg_port, dgg_shim), NeuroGF, pygeodesic sources
 ```
 
 ## Setup
@@ -109,6 +119,16 @@ tm = TerrainMesh(*read_off("data/terrains/HorseMount.off"))
 ix = CertifiedCutIndex(tm, eps=0.1, gap_factor=0.5)     # 4.7 s, 1.3 MB
 lb, ub, est = ix.bounds(10, 700)                         # LB <= d <= UB, (1-eps) d <= LB, UB <= (1+eps) d
 cq = CompiledQuery(ix); cq.bounds(10, 700)               # same answer in ~1 us
+```
+
+## C++ build
+
+```bash
+make -C cpp                                   # cpp/bin/cci_bench, solver_check
+cpp/bin/cci_bench data/terrains/HorseMount.off --eps 0.1 --gap-factor 0.5 --solver hybrid --random 1000
+make -C cpp bin/upo_static                    # needs external/UpdatedStructureTerrainCode
+scripts/run_cpp.sh                            # all C++ runs (detach with nohup); scripts/run_baselines.sh: DGG, NeuroGF
+python3 bench/unified_report.py               # notes/unified_results.md: every method in one table per mesh
 ```
 
 ## Terrain benchmark

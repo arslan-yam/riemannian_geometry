@@ -3,6 +3,6 @@
 from .io import read_off, write_off, projected_areas, repair_height_field
 from .mesh import TerrainMesh
 from .exact import ExactTerrain
-from .a2a import TerrainA2A
+from .a2a import TerrainA2A, CertifiedA2A
 
-__all__ = ["read_off", "write_off", "projected_areas", "repair_height_field", "TerrainMesh", "ExactTerrain", "TerrainA2A"]
+__all__ = ["read_off", "write_off", "projected_areas", "repair_height_field", "TerrainMesh", "ExactTerrain", "TerrainA2A", "CertifiedA2A"]

@@ -194,3 +194,28 @@ def test_steiner_labels_are_admissible(horse):
     B = np.array([ix.bounds(s, t) for s, t in qp])
     assert (B[:, 0] <= truth).all() and (B[:, 1] >= truth * (1 - 1e-6)).all()
     assert (B[:, 1] / truth - 1).mean() < 0.02
+
+
+def test_certified_a2a_bounds_hold(horse, certified):
+    #arbitrary surface points: exact below the near radius, corner bounds above; LB <= d <= UB always
+    import pygeodesic.geodesic as pg
+    from rgeo.terrain import CertifiedA2A, ExactTerrain
+    V, F, tm = horse
+    ix = certified[0]
+    rng = np.random.default_rng(6)
+    ca = CertifiedA2A(tm, ix)
+    ex = ExactTerrain(tm)
+    near = 0
+    for _ in range(25):
+        fp, fq = rng.integers(len(F), size=2)
+        p = rng.dirichlet([1, 1, 1]) @ tm.xy[F[fp]]
+        if _ % 3 == 0: #some close pairs, to exercise the exact branch
+            fq = fp; q = rng.dirichlet([1, 1, 1]) @ tm.xy[F[fq]]
+        else:
+            q = rng.dirichlet([1, 1, 1]) @ tm.xy[F[fq]]
+        V2, F2, idx = ex.insert_points(np.array([p, q]))
+        d = float(pg.PyGeodesicAlgorithmExact(V2, F2).geodesicDistance(int(idx[0]), int(idx[1]))[0])
+        lb, ub, est = ca.bounds(p, fp, q, fq)
+        near += np.hypot(*(p - q)) <= ca.radius
+        assert lb <= d * (1 + 1e-9) and ub >= d * (1 - 1e-9) and lb <= est <= ub
+    assert near >= 8

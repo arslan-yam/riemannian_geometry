@@ -1,0 +1,18 @@
+{
+ "method": "NeuroGF (distance branch)",
+ "mesh": "HorseMount",
+ "n": 793,
+ "sources": 512,
+ "epochs": 30,
+ "iters": 100,
+ "build_s": 1379.4059885840397,
+ "data_s": 4.7571338750422,
+ "train_s": 1374.6488547089975,
+ "index_MB": 0.251392,
+ "query_us": 280.2430566710731,
+ "query_us_batch": 17.001194646582007,
+ "err_mean": 0.45838040558212917,
+ "err_signed_mean": -0.05348731590939053,
+ "err_max": 4.696354503910216,
+ "err_p99": 2.504962194726582
+}

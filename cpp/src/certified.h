@@ -42,7 +42,31 @@ struct Cut {
     std::vector<int64_t> foot_run;
     int submesh_faces = 0;
     bool used_vtp = false;
+    double gap_box = 0;              // portal gap inside the box (fixed g, capped, or scale-dependent)
+    double cell_side = 0;            // shifted hierarchy: side of the cell this line splits
+    // 16-bit coding (encode16): closed-loop deltas along each row, an anchor per run, decoded >= L
+    std::vector<int16_t> Lq;         // |M| x K
+    std::vector<int8_t> Lq8;         // |M| x K (8-bit coding)
+    std::vector<float> La;           // |M| x (runs with portals): the anchors, rounded up
+    std::vector<double> qstep, qerr; // per portal: quantum, and bound of (decoded - true) per label
+    int n_anchor = 0;
+    // Thorup-style covers (build_covers): per row a sorted list of (portal, label)
+    std::vector<int32_t> cov_ptr;    // |M| + 1
+    std::vector<uint16_t> cov_idx;
+    std::vector<float> cov_val;
     int K() const { return (int)pos.size(); }
+};
+
+// one regular, shifted quadtree (the shifted hierarchy); node ids per level and vertex
+struct ShiftNode {
+    int cut[2] = {-1, -1};           // cut ids of the vertical (axis 0) and horizontal (axis 1) line
+    double side = 0, mid[2] = {0, 0};
+};
+struct ShiftCopy {
+    int D = 0;
+    std::vector<int32_t> anc, row;   // n x D: node at each level, row of the vertex in the node's members
+    std::vector<int32_t> depth_of;
+    std::vector<ShiftNode> nodes;
 };
 
 struct Options {
@@ -51,7 +75,12 @@ struct Options {
     std::string solver = "hybrid";  // mmp | vtp | hybrid
     double hybrid_ratio = 2.0;      // hybrid: VTP when sub-mesh faces <= ratio x faces of the members' box
     bool verbose = false;
+    int k_max = 0;                  // version A: at most k_max portals per cut inside the box (0 = no cap)
+    std::string hierarchy = "kd";   // kd (median cuts) | shifted (3 shifted quadtrees, gap max(g, eps lam S / 6))
+    int copies = 3;                 // shifted: number of shifted copies (3 for the 2-d shifting lemma)
 };
+
+enum Storage { DENSE = 0, CODE16 = 1, COVER = 2, CODE8 = 3 };
 
 class CertifiedIndex {
   public:
@@ -73,17 +102,31 @@ class CertifiedIndex {
     std::map<std::string, double> timing;
     int64_t sweeps_mmp = 0, sweeps_vtp = 0;
 
+    std::vector<ShiftCopy> copies;   // shifted hierarchy
+    Storage storage = DENSE;
+    double cover_eps = 0;
+    int64_t cover_entries = 0;
+
     CertifiedIndex(const Terrain& t, const Options& o);
-    void bounds(int s, int t, double* out) const; // LB, UB, estimate
-    size_t nbytes() const;
+    void bounds(int s, int t, double* out) const; // LB, UB, estimate, with the current storage
+    // certify-or-refine: if UB > (1 + eps) LB the pair is computed exactly (local MMP sweep on the
+    // ellipse sub-mesh); returns true when it refined
+    bool bounds_refined(int s, int t, double* out) const;
+    double exact_pair(int s, int t, double ub) const;
+    void encode16(int bits = 16);    // builds the 16-bit (or 8-bit) coded labels (keeps the dense ones)
+    void build_covers(double eps_c); // builds eps_c-covers per row (keeps the dense labels)
+    size_t nbytes() const;           // bytes of what the current storage mode reads
     int64_t portals() const { int64_t k = 0; for (auto& c : cuts) k += c.K(); return k; }
     int64_t labels() const { int64_t k = 0; for (auto& c : cuts) k += (int64_t)c.L.size(); return k; }
 
   private:
     void build_tree();
+    void build_shifted();
     double split_value(std::vector<double> c, int axis) const;
     std::vector<Run> line_pieces(int a, double v, double lo, double hi) const;
-    std::vector<double> place(const Run& r, double r_lo, double r_hi) const;
+    std::vector<double> place(const Run& r, double r_lo, double r_hi, double gap) const;
+    bool select_cut(int s, int t, int& cid, int& rs, int& rt) const;
+    void eval_cut(const Cut& C, int s, int t, int rs, int rt, double* out) const;
     void cut_geometry();
     void labels_phase();
     void finalize_cut(Cut& C, std::vector<float>& Lc, std::vector<double>& Xu, int K);

@@ -212,6 +212,32 @@ locus, with the near-pair radius $R$ chosen so that $e^2/R$ is below the target.
      | 5–6 | 11 | 0.7 km | 1.1% (6) | 0.003% |
 
      Mean 0.150% → 0.049% for 4.5× the portals; the root level is untouched, as the bound says.
+
+     **Revision (2026-10-11): uniform $k$ was the wrong fix, and it is not the default any more.**
+     The table measures *interpolated* answers before the model interpolation and the halo existed.
+     With both in place the proportional budget is nearly as accurate at a fraction of the cost, and
+     uniform $k$ spends its extra portals on deep cuts whose pairs are better answered exactly:
+
+     | GunnisonForest100k (100 pairs, exact labels, model interp.) | build | index | mean err |
+     |---|---:|---:|---:|
+     | uniform $k=32$ | 83,464 s | 252 MB | 0.063% |
+     | $k\propto\lvert C\rvert$ ($k_{\min}=4$) | 16,545 s | 130 MB | 0.076% |
+     | certified index, $\varepsilon=0.2$, $g=1$ edge (arc-length gap + near tables) | 6,854 s | 534 MB | 0.005% |
+
+     | HorseMount (100 pairs) | build | index | mean err |
+     |---|---:|---:|---:|
+     | uniform $k=32$ + model interp. | 19.7 s | 1.14 MB | 0.008% |
+     | $k\propto\lvert C\rvert$ + model interp. | 8.7 s | 0.85 MB | 0.016% |
+     | certified, $\varepsilon=0.2$, $g=1$ edge | 2.8 s | 1.00 MB | 0.036% |
+     | certified, $\varepsilon=0.1$, $g=0.5$ edge | 4.7 s | 1.34 MB | 0.011% |
+
+     What the close pairs need is not more portals on every cut but an exact answer below a
+     radius tied to the spacing: the certified index places portals at a fixed arc-length gap $g$
+     (so the budget is proportional to cut length, like `scale_k`), and stores exact distances for
+     every pair closer than $R = g/(\varepsilon\lambda_{\min})$; every other pair has $d > g/\varepsilon$, so the gap
+     is at most $\varepsilon d$ at every depth (`notes/guarantee.md`, Lemma 4). Uniform $k$ is kept only as an
+     option of the earlier index (`scale_k=False`); the benchmark's default for it is now
+     `scale_k=True`.
    * **A halo table** (`halo_rings`): for every node, distances to all vertices within $r$
      hops regardless of the tree, answered before the portal minimum. With exact labels it
      is free (same sweeps, more targets); HorseMount, uniform $k=32$: max error 3.2% → 1.4%,

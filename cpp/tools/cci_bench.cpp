@@ -8,6 +8,7 @@
 #include <fstream>
 #include <map>
 #include <random>
+#include <sstream>
 #include <string>
 #include "../src/certified.h"
 #include "../src/mesh_io.h"
@@ -16,7 +17,7 @@ using clk = std::chrono::steady_clock;
 
 int main(int argc, char** argv) {
     if (argc < 2) { std::fprintf(stderr, "usage: cci_bench mesh.off [options]\n"); return 1; }
-    std::string mesh = argv[1], pairs_file, json;
+    std::string mesh = argv[1], pairs_file, json, truth_cache;
     Options opt;
     int nrand = 1000, seed = 7;
     bool truth = true;
@@ -32,6 +33,7 @@ int main(int argc, char** argv) {
         else if (a == "--seed") seed = std::stoi(nx());
         else if (a == "--no-truth") truth = false;
         else if (a == "--json") json = nx();
+        else if (a == "--truth-cache") truth_cache = nx();
         else if (a == "--verbose") opt.verbose = true;
         else if (a == "--interp") opt.interp = std::stoi(nx());
     }
@@ -39,9 +41,16 @@ int main(int argc, char** argv) {
     read_off(mesh, V, F);
     Terrain T; T.init(V, F);
     std::vector<std::pair<int, int>> qp;
+    std::vector<double> given; // optional third column: the exact distance
     if (!pairs_file.empty()) {
-        std::ifstream in(pairs_file); int s, t;
-        while (in >> s >> t) qp.push_back({s, t});
+        std::ifstream in(pairs_file); std::string line;
+        while (std::getline(in, line)) {
+            std::istringstream ls(line); int s, t; double d;
+            if (!(ls >> s >> t)) continue;
+            qp.push_back({s, t});
+            if (ls >> d) given.push_back(d);
+        }
+        if (given.size() != qp.size()) given.clear();
     } else {
         std::mt19937_64 rng(seed);
         while ((int)qp.size() < nrand) { int s = rng() % T.n, t = rng() % T.n; if (s != t) qp.push_back({s, t}); }
@@ -62,7 +71,11 @@ int main(int argc, char** argv) {
     }
     std::vector<double> tr(m, NAN);
     double ttruth = 0;
-    if (truth) { // exact MMP on the whole mesh, one early-stopped sweep per distinct source
+    if (truth && !given.empty()) tr = given;
+    else if (truth && !truth_cache.empty() && std::ifstream(truth_cache).good()) {
+        std::ifstream in(truth_cache);
+        for (size_t i = 0; i < m; ++i) in >> tr[i];
+    } else if (truth) { // exact MMP on the whole mesh, one early-stopped sweep per distinct source
         auto t1 = clk::now();
         std::unique_ptr<Solver> sol(make_mmp(T.V, T.F, true));
         std::map<int, std::vector<size_t>> by;
@@ -74,6 +87,7 @@ int main(int argc, char** argv) {
             for (size_t k = 0; k < tg.size(); ++k) tr[kv.second[k]] = d[k];
         }
         ttruth = std::chrono::duration<double>(clk::now() - t1).count();
+        if (!truth_cache.empty()) { std::ofstream o(truth_cache); o.precision(17); for (double d : tr) o << d << "\n"; }
     }
     double emean = 0, emax = 0, ubmax = 0, ubmean = 0, lbmin = 1e30, wmed = 0;
     bool sound = true;

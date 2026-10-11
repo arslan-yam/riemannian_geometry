@@ -6,6 +6,7 @@
 #include "geodesic_algorithm_exact.h"  // third_party/vtp
 #undef geodesic
 #include "solver.h"
+#include <stdexcept>
 
 namespace cci {
 
@@ -15,6 +16,7 @@ struct VTPSolver : Solver {
         std::vector<double> p(V);
         std::vector<unsigned> f(F);
         mesh.initialize_mesh_data(p, f);
+        vtpgeo::GeodesicAlgorithmExact probe(&mesh); // runs VTP's mesh consistency checks (throws)
     }
     void dist(unsigned src, const std::vector<unsigned>& targets, double* out) override {
         // VTP keeps its per-sweep state on the mesh vertices (distance, wavefront state): reset it,
@@ -31,6 +33,13 @@ struct VTPSolver : Solver {
     const char* name() const override { return "VTP"; }
 };
 
-Solver* make_vtp(const std::vector<double>& V, const std::vector<unsigned>& F) { return new VTPSolver(V, F); }
+// nullptr when VTP rejects the mesh (its checks threw); the caller falls back to MMP
+Solver* make_vtp(const std::vector<double>& V, const std::vector<unsigned>& F) {
+    try {
+        return new VTPSolver(V, F);
+    } catch (const std::exception&) {
+        return nullptr;
+    }
+}
 
 }  // namespace cci

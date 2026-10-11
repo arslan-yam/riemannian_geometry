@@ -221,9 +221,9 @@ $c \le \mathrm{diam}_g(B) / (2\lambda_{\min})$. A placement density $w(t) = \sig
 from 1 at the region boundary to 0 at the end of the padding.
 
 **Step 2 — portal budget and placement** (`build_cut_labels`).
-* Budget $k_C = k$ for every cut (`scale_k=False`, the terrain default), or
-  $k_C = \mathrm{clip}(k\, |C| / |C_{\max}|, k_{\min}, k_{\max})$ with $|C|$ the Riemannian length of the
-  region part (`scale_k=True`).
+* Budget $k_C = \mathrm{clip}(k\, |C| / |C_{\max}|, k_{\min}, k_{\max})$ with $|C|$ the Riemannian length of the
+  region part (`scale_k=True`, the default everywhere since the revision in `notes/error_bound.md` §6),
+  or $k_C = k$ for every cut (`scale_k=False`, benchmark method `exact_uniform`).
 * The window is split into **free runs** (maximal intervals outside obstacles and inside $U$) and each
   run into its in-region piece and its padded tails. The $k_C$ portals are shared between region pieces
   in proportion to their placement measure and spaced equally in it. Tails are filled outward from the
@@ -609,3 +609,35 @@ build time, `write_note` regenerates `notes/terrain_results.md` with its caveats
 Minor items, also fixed: `foot_r` falls back to $\lambda_{\min}$ times the chart drop instead of 0; exact sweeps
 use `max_distance=0` (identical answers, early termination). Still by design: interpolated answers are
 two-sided; in the certified index they are clamped into the certified interval.
+
+
+---------------------------------------------------------------------------------------------------
+
+## 13. `cpp/` — the C++ implementation
+
+A line-by-line port of §4.5 (same tree, split values, cut pieces, portal placement, end stretches,
+near tables, feet and query; float32 labels rounded up), validated against the Python index: on the
+1,500 HorseMount pairs of the Python sweep the bounds, estimates and statistics agree to the printed
+digits (max UB error 3.408%, mean 0.0235%, max 1.159%, 1.34 MB). Differences of construction: portals
+in a face with several of them are inserted by repeated 1→3 splits (Python: Delaunay of the face) —
+the surface and therefore the exact labels are the same; the upper bound $U_x$ of a portal's distance
+to the hub takes the face walk and the portal's face corners plus their graph distances.
+
+* `solver.h`, `solver_mmp.cpp`, `solver_vtp.cpp`: one interface over two exact solvers. MMP stops at
+  its targets (Kirsanov's stop rule with a zero distance bound). VTP (Qin et al., SIGGRAPH 2016) is
+  compiled in its own namespace (its headers reuse Kirsanov's names) and sweeps the whole sub-mesh: its
+  vertex queue does not make a popped vertex final, so it has no exact early stop; its per-sweep state
+  lives on the mesh vertices and is reset before every sweep. Measured agreement with MMP: $10^{-15}$
+  relative on every mesh.
+* `Options::solver`: `mmp`, `vtp`, or `hybrid` — VTP for a cut whose label sub-mesh has at most
+  `hybrid_ratio` (2) times the faces of the members' box (the sweeps must cover it anyway), MMP with
+  early stop otherwise.
+* `terrain.h`: mesh in the chart, face planes, face adjacency, `FaceGrid` (faces meeting a box),
+  `PointGrid` (vertices within a radius, nearest vertex), tolerant `locate`, `walk_length` (exact lifted
+  length of a chart segment by walking faces). `graph.h`: mesh graph and a reusable limited Dijkstra.
+* `tools/cci_bench.cpp`: builds the index, evaluates bounds on a pair list against exact MMP (cached),
+  reports soundness, errors, query latency (best of 5 passes) and writes JSON.
+* Competitor drivers: `upo_static.cpp` (the UP-Oracle authors' oracles built once, many POI queries;
+  their own `main` measures one query), `dgg_bench.cpp` (DGG queries; the precompute is the authors'
+  code ported to macOS in `external/dgg_port`: Windows timers and headers replaced, two MSVC-only C++
+  constructs fixed, and one uninitialised edge id at mesh-boundary vertices initialised).

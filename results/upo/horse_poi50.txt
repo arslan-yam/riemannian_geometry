@@ -1,0 +1,8 @@
+mesh has 793 vertices, 1488 faces, 2280 edges
+mesh ../../data/terrains/HorseMount.off vertices 793 faces 1488 POIs 50 eps 0.1 queries 200
+RESULT UP-Oracle  build      492.6 ms  size     0.121 MB  query     0.0042 ms  err mean 2.5266% max 9.9488% min -0.0000%
+RESULT WSPD-Oracle build      473.0 ms  size     1.115 MB  query     0.0030 ms  err mean 0.0317% max 3.1666% min 0.0000%
+RESULT RC-Oracle  build      430.2 ms  size     1.004 MB  query     0.0024 ms  err mean 0.0317% max 3.1666% min 0.0000%
+RESULT EAR-Oracle build     1796.0 ms  size     8.361 MB  query     8.0550 ms  err mean 0.0394% max 1.2748% min 0.0000%
+RESULT WAV-Fly    build        0.0 ms  size     0.000 MB  query     9.0928 ms  err mean 0.0000% max 0.0000% min 0.0000%
+RESULT ESP-Fly    build        0.0 ms  size     0.000 MB  query    12.7008 ms  err mean 0.4192% max 2.4111% min 0.0435%

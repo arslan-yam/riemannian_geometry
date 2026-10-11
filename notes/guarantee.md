@@ -184,3 +184,57 @@ MMP sweeps does not change (every portal still needs its sweep), and the answer 
 $\varepsilon_c$: matching the measured accuracy of full rows (mean error $\sim 10^{-4}$) needs $\varepsilon_c \sim 10^{-4}$,
 i.e. more cover portals than the cut has. The implementation therefore keeps full rows; covers are the
 route to provably near-linear space when a coarser answer suffices.
+
+## 7. Arbitrary surface points (`rgeo.terrain.CertifiedA2A`)
+
+For $p$ in face $f$ and $q$ in face $f'$ with corners $a_i$, $b_j$: the straight segment inside a face
+is a path, so $d(p,a_i) \le w_f|P-A_i|$ and likewise for $q$. From the vertex certificates
+$[\mathrm{LB}(a_i,b_j), \mathrm{UB}(a_i,b_j)]$ and the triangle inequality:
+$$ \mathrm{UB}(p,q) = \min_{i,j}\, w_f|P-A_i| + \mathrm{UB}(a_i,b_j) + w_{f'}|Q-B_j| \;\ge\; d(p,q), $$
+$$ \mathrm{LB}(p,q) = \max\Big(\lambda|P-Q|,\ \max_{i,j}\, \mathrm{LB}(a_i,b_j) - w_f|P-A_i| - w_{f'}|Q-B_j|\Big) \;\le\; d(p,q). $$
+Pairs with $|p-q| \le R$ — and, with the certify-or-refine rule, every pair whose interval is wider
+than $\mathrm{UB} > (1+w)\,\mathrm{LB}$ — are computed exactly: one MMP sweep on the faces meeting
+$\mathrm{bbox}(p,q)$ dilated by $\mathrm{UB}/(2\lambda)$ (ellipse lemma), with both points inserted (a point within
+$10^{-7}$ of an edge is moved by $\sim10^{-5}$ edge lengths; the move is added to both bounds).
+**Theorem (A2A).** Every answer satisfies $\mathrm{LB} \le d(p,q) \le \mathrm{UB} \le (1+w)\,\mathrm{LB} \le (1+w)\,d(p,q)$;
+the default $w = 2\varepsilon$. Without refinement the bound is additive:
+$\mathrm{UB} \le (1+\varepsilon)\,d + 2(1+\varepsilon)(w_f r_p + w_{f'} r_q)$, $r$ the distance to the nearest corner. Measured
+(100 random surface-point pairs per mesh, $\varepsilon = 0.1$): sound everywhere; on BigMount one pair in 100
+was refined, the largest UB error went from 20.2% to 10.2%.
+
+## 8. Size variants (C++: `cpp/src/certified.cpp`, driver `cpp/tools/cci_exp.cpp`)
+
+**A. Capped portals with certify-or-refine** (`Options::k_max`, `bounds_refined`). A cut puts at most
+$k$ portals inside its box: gap $g_C = \max(g, A_C/k)$, $A_C$ the arc length of the box part (tails step
+$\max(g_C, 2\varepsilon\lambda c)$). Lemma 3 (soundness) does not use the gap, so $\mathrm{LB} \le d \le \mathrm{UB}$ for every
+pair. Lemma 4 needs $g_C \le \varepsilon d$; when that fails the interval may be wide, and the query then
+computes the pair exactly (one MMP sweep from $s$ stopped at $t$ on the faces meeting
+$\mathrm{bbox}(s,t)$ dilated by $\mathrm{UB}/(2\lambda)$ — ellipse lemma). **Theorem A.** Every answer satisfies
+$\mathrm{UB} \le (1+\varepsilon)\,\mathrm{LB} \le (1+\varepsilon)\,d$, or is exact. Labels per vertex $\le k \cdot$ depth, i.e.
+$O(nk\log n)$ in total; a uniform random pair needs the exact route with probability about
+$2\pi/(k\varepsilon)^3$ (it must straddle a capped cut closer than $g_C/\varepsilon$).
+
+**Shifted hierarchy** (`Options::hierarchy = "shifted"`). Three regular quadtrees over the chart, copy $j$
+shifted by $j/3$ of the top cell (offset by a tiny irrational amount so that no vertex lies on a grid
+line); a cell splits along its two midlines (a line is built only if members lie on both sides).
+*Shifting lemma.* At every level the three copies' lines lie at offsets $0, S/3, 2S/3$ modulo the cell
+side $S$ (because $2^\ell \not\equiv 0 \bmod 3$); an interval shorter than $S/3$ meets at most one of them per
+axis, so for $\|s-t\|_\infty = r$ and the level with $3r < S \le 6r$, one copy keeps $s$ and $t$ in one cell:
+the smallest common cell over the copies has side $S \le 6r$. The query takes that copy and the cell's
+line that separates $s, t$; then $d \ge \lambda r \ge \lambda S/6$ and (non-near) $d > g/\varepsilon$, so the gap
+$\max(g, \varepsilon\lambda S/6)$ is $\le \varepsilon d$ and Lemma 4 holds unchanged. Portals per line are bounded
+independently of $S$ once $\varepsilon\lambda S/6 > g$: $O(n\log n/\varepsilon)$ labels and sweep area per copy.
+
+**16-bit coding** (`encode16`). Along a run a row is 1-Lipschitz in arc length, so its step from portal
+$j-1$ to $j$ lies in $[-(A_j + e_{j-1}), A_j]$, $e_{j-1}$ the previous decoding error. Each step is stored as
+$\lceil \text{step}/q_j\rceil$ in an int16 with $q_j = (A_j + e_{j-1})/32767$ (shared by the rows of the cut),
+decoded closed-loop (the decoder's previous value is the reference), with the first portal of each
+run stored as a float32 anchor. Every decoded label is $\ge$ the stored one and exceeds it by $< q_j$
+($q_j \approx g/32767$, i.e. $\lesssim 2\varepsilon/32767$ relative to $d$): UB stays a path cost, and every interval
+term of the LB subtracts the decoding error of its two labels.
+
+**Covers** (`build_covers`). Per row an $\varepsilon_c$-cover $Q$ (§6), chosen greedily outwards from each run's
+minimum. The query reconstructs $\ell^+(s,p) = \min_{q\in Q} \ell(s,q) + A(q,p)$ (a path cost, so UB stays
+admissible and $\le (1+\varepsilon_c)\,\mathrm{UB}_{\text{dense}}$) and $\ell^-(s,p) = \max_{q\in Q} \ell(s,q) - A(q,p) \le d(s,p)$,
+whose interval terms are still valid lower bounds (they only need labels $\le$ distances). The
+certificate stays sound; it widens with $\varepsilon_c$.

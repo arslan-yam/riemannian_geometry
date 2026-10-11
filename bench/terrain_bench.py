@@ -8,7 +8,7 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path: #runnable as `python3 bench/terrain_bench.py` without installing the package
     sys.path.insert(0, ROOT)
-from rgeo.terrain import TerrainMesh, read_off, repair_height_field, ExactTerrain, TerrainA2A
+from rgeo.terrain import TerrainMesh, read_off, repair_height_field, ExactTerrain, TerrainA2A, CertifiedA2A
 from rgeo.graphs import dijkstra, get_path
 from rgeo.oracles import H2HIndex, SeparatorIndex, SeparatorCutIndex
 from rgeo.refine import refine_polyline
@@ -219,9 +219,11 @@ def run(mesh_path, n_queries=100, k=32, workers=1, seed=0, out_dir=None, slow_qu
         t0 = time.perf_counter(); vp = SeparatorIndex(points, adj, k=k, leaf_size=leaf_size); tb = time.perf_counter() - t0
         add(f"vertex portals k={k}", tb, index_bytes(vp), measure(vp.query, qp, truth, keep_values=keep))
     configs = []
-    if "exact" in methods: #uniform k per cut is the terrain default (see notes/error_bound.md, section 6)
+    if "exact" in methods: #k per cut proportional to cut length (notes/error_bound.md, section 6, revision)
+        configs += [dict(tag="exact MMP labels, k~|cut|", exact=True, k=kk, scale_k=True, halo_rings=halo_rings) for kk in k_list]
+    if "exact_uniform" in methods: #the former default: the same k on every cut
         configs += [dict(tag="exact MMP labels", exact=True, k=kk, scale_k=False, halo_rings=halo_rings) for kk in k_list]
-    if "exact_scaled" in methods: #the cheap variant: portals proportional to cut length, k_min=4
+    if "exact_scaled" in methods: #kept for old command lines: same as "exact" now
         configs += [dict(tag="exact MMP labels, k~|cut|", exact=True, k=k, scale_k=True, halo_rings=halo_rings)]
     if "cut" in methods: #the general-manifold pipeline: refined graph paths as labels
         configs += [dict(tag=f"refined labels (rounds={rounds}, seg={segments})", exact=False, k=k, scale_k=False, halo_rings=0)]
@@ -302,9 +304,18 @@ def run(mesh_path, n_queries=100, k=32, workers=1, seed=0, out_dir=None, slow_qu
                       f"{rows[-1]['certificate']['max_ub_err']:.3f}% (eps {eps * 100:g}%), width median "
                       f"{rows[-1]['certificate']['width_median']:.3f}% max {rows[-1]['certificate']['width_max']:.3f}%", flush=True)
                 save()
-            if qa and mm is None: #vertex-pair answers from the compiled query when there is one (same values)
-                a2a = TerrainA2A(tm, cq if cq is not None else ix, mode="interp", near=a2a_near)
-                add(label + ", A2A interp", tb, size, measure_a2a(a2a.query, qa, truth_a))
+            if qa and mm is None: #certified A2A: exact below the near radius, corner bounds above it
+                ca = CertifiedA2A(tm, ix, cq)
+                add(label + ", A2A certified", tb, size, measure_a2a(ca.query, qa, truth_a))
+                Ba = np.array([ca.bounds(*x) for x in qa]); ta = np.asarray(truth_a)
+                wa = (Ba[:, 1] - Ba[:, 0]) / Ba[:, 0]
+                rows[-1]["certificate"] = dict(sound=bool(np.all(Ba[:, 0] <= ta * (1 + 1e-12)) and np.all(Ba[:, 1] >= ta * (1 - 1e-12))),
+                                               max_ub_err=float((Ba[:, 1] / ta - 1).max() * 100),
+                                               width_median=float(np.median(wa) * 100), width_max=float(wa.max() * 100),
+                                               exact_pairs=int(sum(np.hypot(*(x[0] - x[2])) <= ca.radius for x in qa)))
+                print(f"    A2A certificate: sound {rows[-1]['certificate']['sound']}, max UB error "
+                      f"{rows[-1]['certificate']['max_ub_err']:.3f}%, width median {rows[-1]['certificate']['width_median']:.3f}%", flush=True)
+                save()
             del ix
     if "refine" in methods:
         sub = qp[:slow_queries]
