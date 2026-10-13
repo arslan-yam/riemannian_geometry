@@ -70,6 +70,13 @@ notes/
   error_bound.md            the error bound of the earlier cut index and what each term implies
   preprocessing.md          the account of the build-time optimisations
   terrain_results.md        all benchmark tables (generated)
+  unified_results.md        every method in one table per mesh (generated)
+  size_results.md           size variants: coding, caps, shifted hierarchy, covers, size vs error (generated)
+  poi_results.md            POI setting: our POI index against the exact POI table (generated)
+  related_work.md           literature map and positioning (incl. Djidjev-Sommer, Kaul et al. bounds)
+  projection.md             full-scale server projection; run list in scripts/server/run_server.sh
+  paper_draft.md            outline of the paper with the measured numbers
+  hyperbolic.md, hyperbolic_h2h.md   side project: hyperbolic domains with obstacles (sketch + H2H check)
 tests/test_core.py          invariants: H2H = Dijkstra, upper bounds, exact walk, gradients, MMP labels,
                             exact obstacle test, face grid, Steiner insertion, certified bounds,
                             compiled query = Python query, Steiner labels admissible
@@ -78,6 +85,8 @@ cpp/                        C++ implementation of the certified index (`make` ->
   src/solver_{mmp,vtp}.cpp  exact solvers: Kirsanov's MMP (early stop) and VTP (Qin et al. 2016)
   src/terrain.h, graph.h    mesh, face / vertex grids, face walk, mesh graph + Dijkstra
   tools/cci_bench.cpp       build + evaluate on vertex pairs against exact MMP
+  tools/cci_exp.cpp         size experiments: storages, caps, shifted hierarchy, POI mode / POI table,
+                            --threads N (bit-identical labels), --store code8 (coded during the build)
   tools/solver_check.cpp    MMP vs VTP: exactness and speed
   tools/upo_static.cpp      the UP-Oracle authors' oracles behind a static many-query driver
   tools/dgg_bench.cpp       DGG (discrete geodesic graph) queries on a precomputed graph
@@ -128,6 +137,9 @@ make -C cpp                                   # cpp/bin/cci_bench, solver_check
 cpp/bin/cci_bench data/terrains/HorseMount.off --eps 0.1 --gap-factor 0.5 --solver hybrid --random 1000
 make -C cpp bin/upo_static                    # needs external/UpdatedStructureTerrainCode
 scripts/run_cpp.sh                            # all C++ runs (detach with nohup); scripts/run_baselines.sh: DGG, NeuroGF
+scripts/run_size.sh; scripts/run_size2.sh     # size variants and size-vs-error; python3 bench/size_report.py
+scripts/run_poi.sh                            # POI setting; python3 bench/poi_report.py
+JOBS=48 scripts/server/run_server.sh          # the full-scale runs on a Linux server (notes/projection.md)
 python3 bench/unified_report.py               # notes/unified_results.md: every method in one table per mesh
 ```
 

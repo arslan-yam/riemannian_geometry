@@ -86,8 +86,6 @@ struct FaceGrid {
     std::vector<double> flo, fhi;     // m x 2 face bounding boxes
     std::vector<int64_t> ptr;         // CSR over cells
     std::vector<int> faces;
-    mutable std::vector<int> stamp;   // de-duplication marks
-    mutable int cur = 0;
 
     void init(const Terrain& T) {
         flo.resize(2 * T.m); fhi.resize(2 * T.m);
@@ -118,13 +116,17 @@ struct FaceGrid {
             int x0, x1, y0, y1; range(f, 0, x0, x1); range(f, 1, y0, y1);
             for (int cx = x0; cx <= x1; ++cx) for (int cy = y0; cy <= y1; ++cy) faces[fill[(size_t)cx * nc[1] + cy]++] = f;
         }
-        stamp.assign(T.m, 0);
     }
     // faces whose bounding box meets [x0, x1] x [y0, y1], ascending
     std::vector<int> in_box(double x0, double x1, double y0, double y1) const {
         auto clampi = [](long v, int lo_, int hi_) { return (int)std::max<long>(lo_, std::min<long>(hi_, v)); };
         int a0 = clampi((long)std::floor((x0 - org[0]) / cell), 0, nc[0] - 1), a1 = clampi((long)std::floor((x1 - org[0]) / cell), 0, nc[0] - 1);
         int b0 = clampi((long)std::floor((y0 - org[1]) / cell), 0, nc[1] - 1), b1 = clampi((long)std::floor((y1 - org[1]) / cell), 0, nc[1] - 1);
+        // de-duplication marks, one set per thread (the build sweeps cuts in parallel); a mark is the
+        // number of the call, so marks left by earlier calls (or by another grid) never match
+        thread_local std::vector<int> stamp;
+        thread_local int cur = 0;
+        if (stamp.size() < flo.size() / 2) stamp.resize(flo.size() / 2, 0);
         if (++cur == std::numeric_limits<int>::max()) { std::fill(stamp.begin(), stamp.end(), 0); cur = 1; }
         std::vector<int> out;
         for (int cx = a0; cx <= a1; ++cx) {

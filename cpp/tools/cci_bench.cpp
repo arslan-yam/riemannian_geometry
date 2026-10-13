@@ -1,6 +1,7 @@
 // Build the Certified Cut Index on a mesh and evaluate it on vertex pairs against exact MMP.
 // usage: cci_bench mesh.off [--eps 0.1] [--gap-factor 0.5] [--solver mmp|vtp|hybrid] [--ratio 2]
 //                  [--pairs file | --random N] [--seed 7] [--no-truth] [--json out.json] [--verbose]
+//                  [--threads 1] [--store dense|code16|code8]
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -36,6 +37,8 @@ int main(int argc, char** argv) {
         else if (a == "--truth-cache") truth_cache = nx();
         else if (a == "--verbose") opt.verbose = true;
         else if (a == "--interp") opt.interp = std::stoi(nx());
+        else if (a == "--threads") opt.threads = std::stoi(nx());
+        else if (a == "--store") opt.store = nx();
     }
     std::vector<double> V; std::vector<unsigned> F;
     read_off(mesh, V, F);

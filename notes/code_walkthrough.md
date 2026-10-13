@@ -637,6 +637,25 @@ to the hub takes the face walk and the portal's face corners plus their graph di
   length of a chart segment by walking faces). `graph.h`: mesh graph and a reusable limited Dijkstra.
 * `tools/cci_bench.cpp`: builds the index, evaluates bounds on a pair list against exact MMP (cached),
   reports soundness, errors, query latency (best of 5 passes) and writes JSON.
+* `tools/cci_exp.cpp`: size experiments. One build, then every requested storage (`dense`, `code16`,
+  `code8`, `coverX`) evaluated on it, with or without certify-or-refine. Further options:
+  - `--poi-random P` / `--poi-file f`: POI mode (UP-Oracle's POI files are read as they are).
+  - `--poi-table`: the exact $P\times P$ baseline, one full VTP sweep per POI.
+  - `--truth-only`: cache exact distances, then exit.
+  - It reports peak RSS.
+* Parallel build (`Options::threads`, `--threads`). `labels_phase` is split into three steps:
+  - `prepare_cut`: the sub-mesh, the members' local ids and the VTP/MMP choice.
+  - `cut_solver`: one solver per thread.
+  - `finish_cut`: finalize and code.
+
+  With several threads, cuts at depth $\le \lceil\log_2 \text{threads}\rceil$ spread their portals over the
+  threads; the remaining cuts are handed out one per thread, shallowest first. `cut_geometry` and
+  `near_phase` run one cut or leaf per thread. `FaceGrid::in_box` keeps its de-duplication marks per
+  thread. The index is bit-identical for any thread count.
+* `Options::store` (`code16` / `code8`): each cut is coded (`encode_cut`) right after `finalize_cut` and its
+  float32 labels are freed, so peak memory is close to the coded index. Covers need the float32 labels.
+* `Options::poi`: rows of `anc` / `row` / `depth_of` / the near tables are indexed by `slot_of[v]`
+  (identity without POIs); a query on a non-POI vertex returns $[0, \infty]$.
 * Competitor drivers: `upo_static.cpp` (the UP-Oracle authors' oracles built once, many POI queries;
   their own `main` measures one query), `dgg_bench.cpp` (DGG queries; the precompute is the authors'
   code ported to macOS in `external/dgg_port`: Windows timers and headers replaced, two MSVC-only C++

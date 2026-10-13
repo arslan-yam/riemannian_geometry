@@ -19,6 +19,10 @@ and dropped, and what is left as future work, ranked by expected impact.
 | NeuroGF — Zhang et al., NeurIPS 2023 (authors' network, distance branch, 3,000 iterations) | none (learned) | 23 min / 0.25 MB / 280 µs (17 µs batched) | 0.46% (max 4.7%) |
 | GeodesicEmbedding — Xia et al., arXiv:2108.13821 | none | no public code; not run | — |
 | exact on the fly: MMP (Kirsanov) / VTP (Qin et al. 2016) | exact | — / — / 9.0 / 3.3 ms | 0 |
+| exact POI table: one full VTP sweep per POI, $P\times P$ float32 (POI setting only) | exact | 50 POIs: 0.3 s / 0.01 MB / 0.03 µs; 793 POIs: 4–6 s / 2.5 MB | 0 |
+| Djidjev–Sommer, ESA 2011 (theory) | $(1+\varepsilon)$, weighted polyhedral surfaces | no implementation known; space $O(n\varepsilon^{-3/2}\log^2\frac n\varepsilon\log\frac1\varepsilon)$, query $O(\varepsilon^{-1}\log\frac1\varepsilon+\log\log n)$ | — |
+| Aleksandrov, Djidjev, Guo, Maheshwari, Nussbaum, Sack, DCG 2010 (theory) | $(1+\varepsilon)$ | no implementation known; space about quadratic in $n$ for a comparable query time | — |
+| Kaul, Wong, Jensen, PVLDB 2016 (distance bounds, on the fly) | LB $\ge 0.9\,$UB per pair | not an index; one graph search per pair | — |
 
 Numbers are the competitors' own C++ harness ([ItakEjgo/weighted_distance_oracle]) on our machine,
 same queries, scored against double-precision MMP (`scripts/competitors/`). The newest paper in the
@@ -31,7 +35,9 @@ query results.
 What these oracles share: the guarantee is relative to a Steiner graph (SE, EAR) and the error that
 is actually delivered is set by the number of Steiner points per edge, not by $\varepsilon$ — EAR's mean
 error is 3.1% at sp=5 and still 2.3% at sp=20 while its index grows to 683 MB. None reports a
-per-query bound.
+per-query bound. The full literature map, including the theory oracles that beat our $n^{1.5}$ bound
+asymptotically (Djidjev–Sommer) and the distance-bounds line (Kaul et al.), is in
+`notes/related_work.md`.
 
 ## 2. Ideas adopted, and what each bought
 
@@ -71,8 +77,14 @@ against EAR-Oracle (sp=5): 23.5 / 52.4 / 107 / 188 / 670 s, 189–702 MB, 3.1–
   answer suffices (≥ 10^6 vertices).
 * **Sweeping from the members instead of the portals.** At deep levels $|M| \approx |P_C|$, and a sweep
   from a member must reach the whole window (tails included), so it is the more expensive side.
-* **16-bit labels.** Residual coding against the 3-d chord would halve the label bytes at ~$10^{-5}$
-  relative error. Not needed at the sizes measured (the index is 20–150× smaller than EAR-Oracle's).
+* **Thorup covers, measured** (`notes/size_results.md`): on our rows they lose to 8-bit coding at every
+  size. At 100k vertices, cover 0.05 gives 230 MB at 0.79% mean error, against 224 MB at 0.0075% for
+  8-bit labels; cover 0.002 is larger than dense. Dropped.
+* **POI mode as a size and build saver** (`results/poi/`). Building the tree over the POIs only works
+  and is sound, but the build is not cheaper: the top cuts dominate in both modes. RobinsonMountain with
+  200 POIs takes 29.5 s, about the same as indexing all 3.7k vertices. In the UP-Oracle setting
+  (50–2,500 POIs) the plain exact table, one full VTP sweep per POI, is cheaper to build, exact and
+  smaller. Our index is for the every-vertex and A2A setting.
 
 ## 4. Future work, ranked (updated 2026-10-11)
 
@@ -83,9 +95,18 @@ $10^{-15}$, 2.6-4.1x per full sweep; the hybrid builds 1.2-1.7x faster), **DGG**
 mean error, so the labels would be $(1+\eta)$ with $\eta$ unproven and the interval LB (which needs exact
 labels) would be lost; with the hybrid exact sweeps the build is already within a small factor.
 
+Also done (2026-10-11):
+- **Parallel build**: `Options::threads`, labels identical to one thread; 2 threads give 2.0x on
+  HorseMount. Benchmarks stay single-threaded.
+- **Labels coded during the build**: `Options::store`, peak memory close to the coded index.
+- **POI mode** (`Options::poi`). Measured not to help; see §3.
+- **Size variants**: capped portals, shifted hierarchy, 16/8-bit coding, covers. Measured in
+  `notes/size_results.md`; see §5.
+
 1. **Scale-dependent gap on shifted hierarchies** (§5.2): the change that alters the $n^{1.5}$ exponent.
-2. **Parallel build**: label sweeps are independent; one parallel loop over portals.
-3. **POI mode** for the UP-Oracle / SE-Oracle setting (§5.2, item 5).
+   Measured to cost more than it saves at 10k–100k, as predicted; it is for ≥1M vertices.
+2. **Server runs at 1M+ vertices** (`notes/projection.md`).
+3. **Faster coded queries**: decoding costs 0.4–1.3 µs over dense at 100k (SIMD prefix sums).
 4. **Tighter A2A upper bounds**: the corner route costs $|pa|(1-\cos\theta)$; storing the distance
    gradient at vertices (the direction of the last geodesic segment) would make the corner terms second
    order.
@@ -164,6 +185,43 @@ flat label scan, accuracy has to become a parameter — which our theorem alread
 5. **POI mode.** When queries are among $k \ll n$ points of interest (the UP-Oracle / SE-Oracle
    setting), build the tree over the POIs and tie $g$ to the POI spacing: labels $O(k\cdot\text{portals})$,
    sweeps stop at the POIs.
+
+### 5.3 Measured (2026-10-11; `notes/size_results.md`, `results/size_error.png`)
+
+| variant | Gunnison10k (ε 0.1, g 0.5) | GunnisonForest100k (ε 0.2, g 1) |
+|---|---|---|
+| kd, float32 | 37.4 MB, 0.0076% | 534 MB, 0.0069% |
+| kd, 16-bit | 24.5 MB (−35%), same error | 330 MB (−38%), same error |
+| kd, 8-bit | 17.7 MB (−53%), 0.0092% | 224 MB (−58%), 0.0075% |
+| cap 50, 8-bit | 15.8 MB, 0.026% | 177 MB (−67%), 0.041% |
+| covers 0.05 | 18.9 MB, 0.69% | 230 MB, 0.79% (dominated by 8-bit) |
+| shifted, float32 | 79.2 MB, 0.028% | 742 MB, 0.12% |
+| shifted, 8-bit | 34.0 MB | 343 MB, 0.12% |
+
+All variants were sound, and no pair needed refining (0 of 1,500 at 10k, 0 of 200 at 100k). Coded
+queries take 0.4–1.3 µs; float32 queries take 0.3–0.5 µs.
+
+**Conclusions.**
+- **Coding is free accuracy-wise and should be the default storage.** 8-bit labels cost +0.0006
+  percentage points of mean error at 100k.
+- **The cap is the next lever.** Cap 50 with 8-bit labels is 3× smaller than float32, at about 6× the
+  mean error (still 0.04%).
+- **The shifted hierarchy loses at 100k, as §5.2 predicted.** It is 1.4× larger, 17× less accurate (its
+  top-level gaps are $\varepsilon\lambda S/6$), and its build was the slowest of the 100k runs (9,194 s,
+  timing noisy). Its gain needs ≥1M vertices.
+- **Matched accuracy against EAR-Oracle.** With the near radius fixed at 5 edges and $\varepsilon$ up to
+  3.2, the mean error reaches EAR's level:
+
+  | mesh | ours | EAR-Oracle |
+  |---|---|---|
+  | HorseMount | 3.7% at 0.66 MB | 3.1% at 189 MB (about 290× larger) |
+  | RobinsonMountain | 2.4% at 3.9 MB | 3.5% at 672 MB |
+  | Gunnison10k | 0.68% at 10.3 MB (coarsest setting) | 3.4% at 702 MB |
+
+  Our certificates stay sound at every point, with max UB/LB 1.9–2.6 at $\varepsilon = 3.2$.
+- **The size floor is the near tables.** At fixed R = 5 edges, Gunnison10k does not go below about
+  10 MB, because the near tables (≈ 90 entries per vertex, 8 bytes each, ≈ 7 MB) dominate. Coding the
+  near-table ids as deltas and the distances in 8/16 bits is the next size step for the small-error regime.
 
 **Recommendation.** 1 (hybrid scale-dependent gap) is the change that alters the exponent while
 keeping everything the paper claims (theorem, certificates, $\mu$s queries); 2 and the label

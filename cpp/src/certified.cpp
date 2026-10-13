@@ -1,12 +1,31 @@
 #include "certified.h"
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
+#include <mutex>
 #include <numeric>
+#include <stdexcept>
+#include <thread>
 
 namespace cci {
 
 using clk = std::chrono::steady_clock;
 static double secs(clk::time_point a) { return std::chrono::duration<double>(clk::now() - a).count(); }
+
+// body(tid) on nt threads (inline when nt == 1)
+template <class F> static void run_threads(int nt, F&& body) {
+    if (nt <= 1) { body(0); return; }
+    std::vector<std::thread> th;
+    for (int t = 0; t < nt; ++t) th.emplace_back([&body, t]() { body(t); });
+    for (auto& x : th) x.join();
+}
+// body(i, tid) for i < n, handed out one at a time (dynamic scheduling); in order when nt == 1
+template <class F> static void parallel_for(int nt, size_t n, F&& body) {
+    std::atomic<size_t> next{0};
+    run_threads((int)std::min<size_t>((size_t)std::max(nt, 1), std::max<size_t>(n, 1)), [&](int tid) {
+        for (size_t i; (i = next++) < n;) body(i, tid);
+    });
+}
 
 // numpy.interp for increasing xp
 static double interp1(double x, const std::vector<double>& xp, const std::vector<double>& fp) {
@@ -25,6 +44,20 @@ CertifiedIndex::CertifiedIndex(const Terrain& t, const Options& o) : T(t), opt(o
     g = opt.gap > 0 ? opt.gap : opt.gap_factor * T.edge;
     Rn = g / (eps * lam);
     Rq = Rn * (1.0 + 1e-9);
+    slot_of.assign(T.n, -1);
+    if (opt.poi.empty()) {
+        for (int i = 0; i < T.n; ++i) slot_of[i] = i;
+        NP = T.n;
+    } else {
+        if (opt.hierarchy == "shifted") throw std::invalid_argument("POI mode needs the kd hierarchy");
+        poi_list = opt.poi;
+        std::sort(poi_list.begin(), poi_list.end());
+        poi_list.erase(std::unique(poi_list.begin(), poi_list.end()), poi_list.end());
+        if (poi_list.front() < 0 || poi_list.back() >= T.n) throw std::invalid_argument("POI out of range");
+        for (size_t i = 0; i < poi_list.size(); ++i) slot_of[poi_list[i]] = (int32_t)i;
+        NP = (int)poi_list.size();
+    }
+    if (opt.store != "dense" && opt.store != "code16" && opt.store != "code8") throw std::invalid_argument("store: dense | code16 | code8");
     grid.init(T);
     pgrid.init(T.xy, std::max(Rq, T.edge));
     G.from_mesh(T);
@@ -40,6 +73,8 @@ CertifiedIndex::CertifiedIndex(const Terrain& t, const Options& o) : T(t), opt(o
     t0 = clk::now(); labels_phase(); timing["labels"] = secs(t0);
     t0 = clk::now(); near_phase(); timing["near_tables"] = secs(t0);
     t0 = clk::now(); feet_phase(); timing["feet"] = secs(t0);
+    if (opt.store == "code16") storage = CODE16;
+    if (opt.store == "code8") storage = CODE8;
 }
 
 // ---------------------------------------------------------------- separator tree
@@ -69,13 +104,13 @@ double CertifiedIndex::split_value(std::vector<double> cs, int axis) const {
 }
 
 void CertifiedIndex::build_tree() {
-    const int n = T.n, maxd = 64;
+    const int n = NP, maxd = 64; // rows: indexed vertices (all of them, or the POIs)
     std::vector<int32_t> ancF((size_t)n * maxd, -1), rowF((size_t)n * maxd, -1);
     depth_of.assign(n, 0);
     struct Item { std::vector<int> M; int depth; };
     std::vector<Item> stack;
-    std::vector<int> all(n);
-    std::iota(all.begin(), all.end(), 0);
+    std::vector<int> all(poi_list);
+    if (all.empty()) { all.resize(T.n); std::iota(all.begin(), all.end(), 0); }
     stack.push_back({all, 0});
     while (!stack.empty()) {
         Item it = std::move(stack.back());
@@ -97,7 +132,7 @@ void CertifiedIndex::build_tree() {
             }
         }
         if (std::isnan(v)) {
-            for (int u : M) depth_of[u] = depth;
+            for (int u : M) depth_of[slot_of[u]] = depth;
             leaves.push_back(M);
             continue;
         }
@@ -108,7 +143,7 @@ void CertifiedIndex::build_tree() {
         std::vector<int> Mg, Ml;
         for (size_t r = 0; r < M.size(); ++r) {
             int u = M[r];
-            ancF[(size_t)u * maxd + depth] = cid; rowF[(size_t)u * maxd + depth] = (int32_t)r;
+            ancF[(size_t)slot_of[u] * maxd + depth] = cid; rowF[(size_t)slot_of[u] * maxd + depth] = (int32_t)r;
             double x = T.xy[2 * u + a];
             if (x > v) Mg.push_back(u); else if (x < v) Ml.push_back(u);
         }
@@ -294,8 +329,11 @@ std::vector<double> CertifiedIndex::place(const Run& R, double r_lo, double r_hi
 }
 
 void CertifiedIndex::cut_geometry() {
-    Dijkstra dij(G);
-    for (auto& C : cuts) {
+    const int nt = std::max(1, opt.threads);
+    std::vector<Dijkstra> dijs(nt, Dijkstra(G));
+    parallel_for(nt, cuts.size(), [&](size_t cid, int tid) {
+        Cut& C = cuts[cid];
+        Dijkstra& dij = dijs[tid];
         int a = C.axis, b = 1 - a;
         double r_lo = C.lo[b], r_hi = C.hi[b];
         double ctr[2] = {0.5 * (C.lo[0] + C.hi[0]), 0.5 * (C.lo[1] + C.hi[1])};
@@ -333,7 +371,7 @@ void CertifiedIndex::cut_geometry() {
         C.X.assign(2 * K, 0);
         for (int j = 0; j < K; ++j) { C.X[2 * j + a] = C.v; C.X[2 * j + b] = C.pos[j]; }
         C.mu = mu; C.hub = hub;
-    }
+    });
 }
 
 // ---------------------------------------------------------------- labels
@@ -463,86 +501,138 @@ void CertifiedIndex::finalize_cut(Cut& C, std::vector<float>& Lc, std::vector<do
     C.L = std::move(L2); C.X = std::move(X2); C.pos = std::move(pos); C.arc = std::move(arcs); C.run = std::move(rid);
 }
 
-void CertifiedIndex::labels_phase() {
-    Dijkstra dij(G);
-    std::vector<double> V2, Xu, out;
-    std::vector<unsigned> F2;
-    std::vector<int> used, pidx;
-    for (size_t cid = 0; cid < cuts.size(); ++cid) {
-        Cut& C = cuts[cid];
-        int K = C.K(), a = C.axis;
-        size_t nm = C.M.size();
-        if (K == 0) { std::vector<float> L0; std::vector<double> X0; finalize_cut(C, L0, X0, 0); continue; }
-        double lim = opt.hub_slack * std::hypot(C.hi[0] - C.lo[0], C.hi[1] - C.lo[1]) * 2.0 + 10 * T.edge + 2 * C.mu;
-        dij.run(C.hub, lim);
-        // upper bounds of d(portal, hub): straight walk, or a corner of the portal's face + its graph distance
-        auto ubounds = [&](std::vector<double>& U) {
-            U.assign(K, INF);
-            const double* H = &T.xy[2 * C.hub];
-            for (int j = 0; j < K; ++j) {
-                const double* x = &C.X[2 * j];
-                U[j] = walk_length(T, grid, x, H);
-                int f = locate(T, grid, x[0], x[1]);
-                if (f >= 0) {
-                    double z = T.z_at(f, x[0], x[1]);
-                    for (int k = 0; k < 3; ++k) {
-                        int vtx = (int)T.F[3 * f + k];
-                        double d = T.w[f] * std::sqrt(std::pow(T.V[3 * vtx] - x[0], 2) + std::pow(T.V[3 * vtx + 1] - x[1], 2) + std::pow(T.V[3 * vtx + 2] - z, 2));
-                        U[j] = std::min(U[j], d + dij.dist[vtx]);
-                    }
+// the faces meeting the members' and portals' box dilated by R = (max UB(portal, hub) + mu) / (2 lambda)
+// (ellipse lemma), with the portals inserted as vertices; the members' local ids; VTP or MMP
+void CertifiedIndex::prepare_cut(const Cut& C, Dijkstra& dij, CutWork& W) const {
+    int K = C.K(), a = C.axis;
+    size_t nm = C.M.size();
+    double lim = opt.hub_slack * std::hypot(C.hi[0] - C.lo[0], C.hi[1] - C.lo[1]) * 2.0 + 10 * T.edge + 2 * C.mu;
+    dij.run(C.hub, lim);
+    // upper bounds of d(portal, hub): straight walk, or a corner of the portal's face + its graph distance
+    auto ubounds = [&](std::vector<double>& U) {
+        U.assign(K, INF);
+        const double* H = &T.xy[2 * C.hub];
+        for (int j = 0; j < K; ++j) {
+            const double* x = &C.X[2 * j];
+            U[j] = walk_length(T, grid, x, H);
+            int f = locate(T, grid, x[0], x[1]);
+            if (f >= 0) {
+                double z = T.z_at(f, x[0], x[1]);
+                for (int k = 0; k < 3; ++k) {
+                    int vtx = (int)T.F[3 * f + k];
+                    double d = T.w[f] * std::sqrt(std::pow(T.V[3 * vtx] - x[0], 2) + std::pow(T.V[3 * vtx + 1] - x[1], 2) + std::pow(T.V[3 * vtx + 2] - z, 2));
+                    U[j] = std::min(U[j], d + dij.dist[vtx]);
                 }
             }
-        };
-        std::vector<double> U;
-        ubounds(U);
-        if (!std::all_of(U.begin(), U.end(), [](double x) { return std::isfinite(x); })) { dij.run(C.hub); ubounds(U); }
-        double R = (*std::max_element(U.begin(), U.end()) + C.mu) / (2.0 * lam);
-        double blo[2] = {INF, INF}, bhi[2] = {-INF, -INF};
-        for (int u : C.M) for (int k = 0; k < 2; ++k) { blo[k] = std::min(blo[k], T.xy[2 * u + k]); bhi[k] = std::max(bhi[k], T.xy[2 * u + k]); }
-        for (int j = 0; j < K; ++j) for (int k = 0; k < 2; ++k) { blo[k] = std::min(blo[k], C.X[2 * j + k]); bhi[k] = std::max(bhi[k], C.X[2 * j + k]); }
-        std::vector<int> faces = grid.in_box(blo[0] - R, bhi[0] + R, blo[1] - R, bhi[1] + R);
-        double along[2] = {0, 0}; along[1 - a] = 1.0;
-        submesh(faces, C.X, along, V2, F2, used, pidx, Xu);
-        std::vector<unsigned> tgt(nm);
-        for (size_t r = 0; r < nm; ++r) tgt[r] = (unsigned)(std::lower_bound(used.begin(), used.end(), C.M[r]) - used.begin());
-        bool vtp = opt.solver == "vtp";
-        if (opt.solver == "hybrid") {
-            size_t nbox = grid.in_box(blo[0], bhi[0], blo[1], bhi[1]).size();
-            vtp = faces.size() <= opt.hybrid_ratio * nbox;
         }
-        std::unique_ptr<Solver> sol(vtp ? make_vtp(V2, F2) : nullptr);
-        if (!sol) { vtp = false; sol.reset(make_mmp(V2, F2, true)); } // VTP rejected the sub-mesh: MMP
-        C.used_vtp = vtp;
-        std::vector<float> Lc(nm * K, std::numeric_limits<float>::infinity());
-        out.resize(nm);
-        for (int j = 0; j < K; ++j) {
-            if (pidx[j] < 0) continue;
-            sol->dist((unsigned)pidx[j], tgt, out.data());
-            for (size_t r = 0; r < nm; ++r) Lc[r * K + j] = f32_up(out[r]);
-            (vtp ? sweeps_vtp : sweeps_mmp)++;
-        }
-        C.submesh_faces = (int)faces.size();
-        finalize_cut(C, Lc, Xu, K);
-        if (opt.verbose && cid % 100 == 0)
-            std::fprintf(stderr, "  cut %zu/%zu: %zu members, %d portals, sub-mesh %zu faces, %s\n", cid, cuts.size(), nm, K, faces.size(), vtp ? "VTP" : "MMP");
+    };
+    std::vector<double> U;
+    ubounds(U);
+    if (!std::all_of(U.begin(), U.end(), [](double x) { return std::isfinite(x); })) { dij.run(C.hub); ubounds(U); }
+    double R = (*std::max_element(U.begin(), U.end()) + C.mu) / (2.0 * lam);
+    double blo[2] = {INF, INF}, bhi[2] = {-INF, -INF};
+    for (int u : C.M) for (int k = 0; k < 2; ++k) { blo[k] = std::min(blo[k], T.xy[2 * u + k]); bhi[k] = std::max(bhi[k], T.xy[2 * u + k]); }
+    for (int j = 0; j < K; ++j) for (int k = 0; k < 2; ++k) { blo[k] = std::min(blo[k], C.X[2 * j + k]); bhi[k] = std::max(bhi[k], C.X[2 * j + k]); }
+    std::vector<int> faces = grid.in_box(blo[0] - R, bhi[0] + R, blo[1] - R, bhi[1] + R);
+    double along[2] = {0, 0}; along[1 - a] = 1.0;
+    submesh(faces, C.X, along, W.V2, W.F2, W.used, W.pidx, W.Xu);
+    W.tgt.resize(nm);
+    for (size_t r = 0; r < nm; ++r) W.tgt[r] = (unsigned)(std::lower_bound(W.used.begin(), W.used.end(), C.M[r]) - W.used.begin());
+    W.vtp = opt.solver == "vtp";
+    if (opt.solver == "hybrid") {
+        size_t nbox = grid.in_box(blo[0], bhi[0], blo[1], bhi[1]).size();
+        W.vtp = faces.size() <= opt.hybrid_ratio * nbox;
     }
+    W.nfaces = faces.size();
+}
+
+// VTP on the sub-mesh, or MMP with early stop (also when VTP rejects the sub-mesh)
+Solver* CertifiedIndex::cut_solver(const CutWork& W, bool& vtp) const {
+    Solver* s = vtp ? make_vtp(W.V2, W.F2) : nullptr;
+    if (!s) { vtp = false; s = make_mmp(W.V2, W.F2, true); }
+    return s;
+}
+
+void CertifiedIndex::finish_cut(Cut& C, std::vector<float>& Lc, CutWork& W, int K) {
+    C.submesh_faces = (int)W.nfaces;
+    finalize_cut(C, Lc, W.Xu, K);
+    int bits = opt.store == "code8" ? 8 : opt.store == "code16" ? 16 : 0;
+    if (bits && encode_cut(C, bits)) std::vector<float>().swap(C.L); // coded: the float32 labels go
+}
+
+// One sweep per portal on the cut's sub-mesh. With several threads the top cuts (largest sub-meshes)
+// are done one at a time with their portals spread over the threads (a solver per thread), the rest
+// one cut per thread, largest first. Every sweep is the same as on one thread, so are the labels.
+void CertifiedIndex::labels_phase() {
+    const int nt = std::max(1, opt.threads);
+    std::atomic<int64_t> n_mmp{0}, n_vtp{0};
+    std::mutex log_mu;
+    std::vector<Dijkstra> dijs(nt, Dijkstra(G));
+    auto report = [&](size_t cid, const Cut& C, int K, bool vtp) {
+        if (!opt.verbose || cid % 100 != 0) return;
+        std::lock_guard<std::mutex> lk(log_mu);
+        std::fprintf(stderr, "  cut %zu/%zu: %zu members, %d portals, sub-mesh %d faces, %s\n", cid, cuts.size(), C.M.size(), K, C.submesh_faces, vtp ? "VTP" : "MMP");
+    };
+    // portals of cut cid swept by `workers` threads (the calling thread alone when workers == 1)
+    auto do_cut = [&](size_t cid, int tid, int workers) {
+        Cut& C = cuts[cid];
+        int K = C.K();
+        if (K == 0) { std::vector<float> L0; std::vector<double> X0; finalize_cut(C, L0, X0, 0); return; }
+        CutWork W;
+        prepare_cut(C, dijs[tid], W);
+        size_t nm = C.M.size();
+        std::vector<float> Lc(nm * K, std::numeric_limits<float>::infinity());
+        std::atomic<int> next{0};
+        std::vector<char> vtp_used(workers, 0);
+        run_threads(workers, [&](int w) {
+            bool vtp = W.vtp;
+            std::unique_ptr<Solver> sol(cut_solver(W, vtp));
+            vtp_used[w] = vtp;
+            std::vector<double> out(nm);
+            for (int j; (j = next++) < K;) {
+                if (W.pidx[j] < 0) continue;
+                sol->dist((unsigned)W.pidx[j], W.tgt, out.data());
+                for (size_t r = 0; r < nm; ++r) Lc[r * K + j] = f32_up(out[r]);
+                (vtp ? n_vtp : n_mmp)++;
+            }
+        });
+        C.used_vtp = vtp_used[0];
+        finish_cut(C, Lc, W, K);
+        report(cid, C, K, C.used_vtp);
+    };
+    if (nt == 1) {
+        for (size_t cid = 0; cid < cuts.size(); ++cid) do_cut(cid, 0, 1);
+    } else {
+        int split_depth = 1;
+        while ((1 << split_depth) < nt) ++split_depth;
+        std::vector<size_t> rest;
+        for (size_t cid = 0; cid < cuts.size(); ++cid) {
+            if (cuts[cid].depth <= split_depth) do_cut(cid, 0, nt);
+            else rest.push_back(cid);
+        }
+        std::stable_sort(rest.begin(), rest.end(), [&](size_t x, size_t y) { return cuts[x].depth < cuts[y].depth; });
+        parallel_for(nt, rest.size(), [&](size_t i, int tid) { do_cut(rest[i], tid, 1); });
+    }
+    sweeps_mmp += n_mmp; sweeps_vtp += n_vtp;
 }
 
 // ---------------------------------------------------------------- near tables
 void CertifiedIndex::near_phase() {
-    int n = T.n;
-    std::vector<std::vector<int32_t>> ids(n);
-    std::vector<std::vector<float>> dd(n);
-    Dijkstra dij(G);
-    std::vector<double> V2, Xu, out;
-    std::vector<unsigned> F2;
-    std::vector<int> used, pidx;
-    for (const auto& M : leaves) {
+    std::vector<std::vector<int32_t>> ids(NP);
+    std::vector<std::vector<float>> dd(NP);
+    const int nt = std::max(1, opt.threads);
+    std::vector<Dijkstra> dijs(nt, Dijkstra(G));
+    parallel_for(nt, leaves.size(), [&](size_t li, int tid) {
+        const auto& M = leaves[li];
+        Dijkstra& dij = dijs[tid];
+        std::vector<double> V2, Xu, out;
+        std::vector<unsigned> F2;
+        std::vector<int> used, pidx;
         std::vector<std::vector<int>> Tg(M.size());
         std::vector<int> allt(M.begin(), M.end());
         for (size_t i = 0; i < M.size(); ++i) {
             int s = M[i];
-            for (int t : pgrid.radius(T.xy[2 * s], T.xy[2 * s + 1], Rq)) if (t != s) Tg[i].push_back(t);
+            for (int t : pgrid.radius(T.xy[2 * s], T.xy[2 * s + 1], Rq)) if (t != s && slot_of[t] >= 0) Tg[i].push_back(t);
             allt.insert(allt.end(), Tg[i].begin(), Tg[i].end());
         }
         std::sort(allt.begin(), allt.end());
@@ -556,6 +646,7 @@ void CertifiedIndex::near_phase() {
             if (!fin) dij.run(M[i]);
             for (int t : Tg[i]) Umax = std::max(Umax, dij.dist[t]);
         }
+        if (Umax == 0) return; // no near pairs in this leaf
         double R = Umax / (2.0 * lam);
         double blo[2] = {INF, INF}, bhi[2] = {-INF, -INF};
         for (int u : allt) for (int k = 0; k < 2; ++k) { blo[k] = std::min(blo[k], T.xy[2 * u + k]); bhi[k] = std::max(bhi[k], T.xy[2 * u + k]); }
@@ -571,15 +662,16 @@ void CertifiedIndex::near_phase() {
             for (size_t k = 0; k < tl.size(); ++k) tl[k] = loc(Tg[i][k]);
             out.resize(tl.size());
             sol->dist(loc(s), tl, out.data());
-            ids[s].assign(Tg[i].begin(), Tg[i].end());
-            dd[s].resize(tl.size());
-            for (size_t k = 0; k < tl.size(); ++k) dd[s][k] = f32_up(out[k]);
+            int32_t r = slot_of[s];
+            ids[r].assign(Tg[i].begin(), Tg[i].end());
+            dd[r].resize(tl.size());
+            for (size_t k = 0; k < tl.size(); ++k) dd[r][k] = f32_up(out[k]);
         }
-    }
-    near_ptr.assign(n + 1, 0);
-    for (int i = 0; i < n; ++i) near_ptr[i + 1] = near_ptr[i] + (int64_t)ids[i].size();
-    near_ids.resize(near_ptr[n]); near_d.resize(near_ptr[n]);
-    for (int i = 0; i < n; ++i) {
+    });
+    near_ptr.assign(NP + 1, 0);
+    for (int i = 0; i < NP; ++i) near_ptr[i + 1] = near_ptr[i] + (int64_t)ids[i].size();
+    near_ids.resize(near_ptr[NP]); near_d.resize(near_ptr[NP]);
+    for (int i = 0; i < NP; ++i) {
         std::copy(ids[i].begin(), ids[i].end(), near_ids.begin() + near_ptr[i]);
         std::copy(dd[i].begin(), dd[i].end(), near_d.begin() + near_ptr[i]);
     }
@@ -665,12 +757,13 @@ double CertifiedIndex::interp(const Cut& C, const double* f, int K, int i, int r
 // copy whose common cell is smallest and that cell's line separating s and t
 bool CertifiedIndex::select_cut(int s, int t, int& cid, int& rs, int& rt) const {
     if (copies.empty()) {
-        const int32_t *as = &anc[(size_t)s * D], *at = &anc[(size_t)t * D];
+        const size_t ss = (size_t)slot_of[s], st = (size_t)slot_of[t];
+        const int32_t *as = &anc[ss * D], *at = &anc[st * D];
         int k = -1;
         for (int j = 0; j < D; ++j) if (as[j] != at[j]) { k = j; break; }
-        if (k < 0) k = std::min(depth_of[s], depth_of[t]);
+        if (k < 0) k = std::min(depth_of[ss], depth_of[st]);
         if (k <= 0) return false;
-        cid = as[k - 1]; rs = row[(size_t)s * D + k - 1]; rt = row[(size_t)t * D + k - 1];
+        cid = as[k - 1]; rs = row[ss * D + k - 1]; rt = row[st * D + k - 1];
         return cid >= 0;
     }
     double best = INF;
@@ -785,9 +878,11 @@ void CertifiedIndex::eval_cut(const Cut& C, int s, int t, int rs, int rt, double
 
 void CertifiedIndex::bounds(int s, int t, double* out) const {
     if (s == t) { out[0] = out[1] = out[2] = 0; return; }
+    const int32_t ss = slot_of[s];
+    if (ss < 0 || slot_of[t] < 0) { out[0] = 0; out[1] = out[2] = INF; return; } // POI mode: not indexed
     double dx = T.xy[2 * s] - T.xy[2 * t], dy = T.xy[2 * s + 1] - T.xy[2 * t + 1];
     if (dx * dx + dy * dy <= Rq * Rq) {
-        auto b0 = near_ids.begin() + near_ptr[s], b1 = near_ids.begin() + near_ptr[s + 1];
+        auto b0 = near_ids.begin() + near_ptr[ss], b1 = near_ids.begin() + near_ptr[ss + 1];
         auto it = std::lower_bound(b0, b1, t);
         if (it != b1 && *it == t) {
             double d = near_d[it - near_ids.begin()];
@@ -833,43 +928,53 @@ bool CertifiedIndex::bounds_refined(int s, int t, double* out) const {
 // next label lies in [-(A_j + e_{j-1}), A_j] with e the previous decoding error. Each step is stored as
 // ceil(step / q_j) with q_j = (A_j + e_{j-1}) / 32767 (shared by all rows of the cut), decoded values are
 // re-used (closed loop), so every decoded label is >= the stored one and exceeds it by < q_j
-void CertifiedIndex::encode16(int bits) {
+bool CertifiedIndex::encode_cut(Cut& C, int bits) {
     const double qmax = bits == 8 ? 127.0 : 32767.0, qmin = bits == 8 ? -128.0 : -32768.0;
-    for (auto& C : cuts) {
-        int K = C.K();
-        size_t nm = C.M.size();
-        if (K == 0) { C.Lq.clear(); C.La.clear(); continue; }
-        float Lmax = 0;
-        for (float x : C.L) if (std::isfinite(x)) Lmax = std::max(Lmax, x);
-        double ulp = std::ldexp((double)Lmax, -22); // a float32 anchor's error, generously
-        C.qstep.assign(K, 0.0); C.qerr.assign(K, ulp);
-        C.n_anchor = 0;
+    int K = C.K();
+    size_t nm = C.M.size();
+    if (K == 0) { C.Lq.clear(); C.Lq8.clear(); C.La.clear(); return false; }
+    float Lmax = 0;
+    for (float x : C.L) if (std::isfinite(x)) Lmax = std::max(Lmax, x);
+    double ulp = std::ldexp((double)Lmax, -22); // a float32 anchor's error, generously
+    C.qstep.assign(K, 0.0); C.qerr.assign(K, ulp);
+    C.n_anchor = 0;
+    for (int j = 0; j < K; ++j) {
+        if (j == 0 || C.run[j] != C.run[j - 1]) { C.n_anchor++; continue; }
+        double A = C.arc[j] - C.arc[j - 1];
+        C.qstep[j] = (A * (1 + 1e-6) + C.qerr[j - 1] + 4 * ulp) / qmax;
+        C.qerr[j] = C.qstep[j];
+    }
+    if (bits == 8) { C.Lq8.assign(nm * K, 0); C.Lq.clear(); } else { C.Lq.assign(nm * K, 0); C.Lq8.clear(); }
+    C.La.assign(nm * C.n_anchor, 0.f);
+    bool ok = true;
+    for (size_t r = 0; r < nm && ok; ++r) {
+        const float* Lr = &C.L[r * K];
+        double dec = 0;
+        int slot = 0;
         for (int j = 0; j < K; ++j) {
-            if (j == 0 || C.run[j] != C.run[j - 1]) { C.n_anchor++; continue; }
-            double A = C.arc[j] - C.arc[j - 1];
-            C.qstep[j] = (A * (1 + 1e-6) + C.qerr[j - 1] + 4 * ulp) / qmax;
-            C.qerr[j] = C.qstep[j];
-        }
-        if (bits == 8) { C.Lq8.assign(nm * K, 0); C.Lq.clear(); } else { C.Lq.assign(nm * K, 0); C.Lq8.clear(); }
-        C.La.assign(nm * C.n_anchor, 0.f);
-        bool ok = true;
-        for (size_t r = 0; r < nm && ok; ++r) {
-            const float* Lr = &C.L[r * K];
-            double dec = 0;
-            int slot = 0;
-            for (int j = 0; j < K; ++j) {
-                if (j == 0 || C.run[j] != C.run[j - 1]) {
-                    C.La[r * C.n_anchor + slot++] = Lr[j];
-                    dec = Lr[j];
-                } else {
-                    double q = std::ceil(((double)Lr[j] - dec) / C.qstep[j]);
-                    if (q < qmin || q > qmax || !std::isfinite(q)) { ok = false; break; } // cannot happen (1-Lipschitz rows)
-                    if (bits == 8) C.Lq8[r * K + j] = (int8_t)q; else C.Lq[r * K + j] = (int16_t)q;
-                    dec += q * C.qstep[j];
-                }
+            if (j == 0 || C.run[j] != C.run[j - 1]) {
+                C.La[r * C.n_anchor + slot++] = Lr[j];
+                dec = Lr[j];
+            } else {
+                double q = std::ceil(((double)Lr[j] - dec) / C.qstep[j]);
+                if (q < qmin || q > qmax || !std::isfinite(q)) { ok = false; break; } // cannot happen (1-Lipschitz rows)
+                if (bits == 8) C.Lq8[r * K + j] = (int8_t)q; else C.Lq[r * K + j] = (int16_t)q;
+                dec += q * C.qstep[j];
             }
         }
-        if (!ok) { C.Lq.clear(); C.Lq8.clear(); C.La.clear(); } // this cut stays dense
+    }
+    if (!ok) { C.Lq.clear(); C.Lq8.clear(); C.La.clear(); } // this cut stays dense
+    return ok;
+}
+
+void CertifiedIndex::encode16(int bits) {
+    for (auto& C : cuts) {
+        if (C.L.empty() && C.K() > 0 && !C.M.empty()) { // coded during the build: the labels are gone
+            bool have = bits == 8 ? !C.Lq8.empty() : !C.Lq.empty();
+            if (!have) std::fprintf(stderr, "encode16(%d): cut coded at the other width during the build, left as is\n", bits);
+            continue;
+        }
+        encode_cut(C, bits);
     }
 }
 
@@ -877,6 +982,8 @@ void CertifiedIndex::encode16(int bits) {
 // in Q with l(q) + A(q, p) <= (1 + eps_c) l(p). Greedy outwards from each run's minimum (valid for any
 // row; near-minimal for the V-shaped rows of a terrain)
 void CertifiedIndex::build_covers(double eps_c) {
+    for (auto& C : cuts)
+        if (C.L.empty() && C.K() > 0 && !C.M.empty()) { std::fprintf(stderr, "build_covers: labels were coded during the build (store != dense)\n"); return; }
     cover_eps = eps_c;
     cover_entries = 0;
     for (auto& C : cuts) {
@@ -924,6 +1031,7 @@ size_t CertifiedIndex::nbytes() const {
     }
     b += near_ids.size() * 4 + near_d.size() * 4 + near_ptr.size() * 8;
     b += anc.size() * 4 + row.size() * 4;
+    if (!poi_list.empty()) b += slot_of.size() * 4; // vertex -> POI row
     for (auto& Cp : copies) b += Cp.anc.size() * 4 + Cp.row.size() * 4 + Cp.nodes.size() * sizeof(ShiftNode);
     return b;
 }

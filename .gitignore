@@ -239,3 +239,4 @@ results/dgg/*.binary
 results/dgg/*.off
 results/dgg/dist_*.txt
 rgeo/**/_c*.so
+cpp/bin_dev/

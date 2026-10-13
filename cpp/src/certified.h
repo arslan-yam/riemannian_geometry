@@ -78,6 +78,11 @@ struct Options {
     int k_max = 0;                  // version A: at most k_max portals per cut inside the box (0 = no cap)
     std::string hierarchy = "kd";   // kd (median cuts) | shifted (3 shifted quadtrees, gap max(g, eps lam S / 6))
     int copies = 3;                 // shifted: number of shifted copies (3 for the 2-d shifting lemma)
+    int threads = 1;                // label sweeps, near tables and cut geometry on this many threads
+                                    // (results identical to one thread; benchmarks use one)
+    std::string store = "dense";    // dense | code16 | code8: code each cut's labels as soon as it is built
+                                    // and drop its float32 labels (peak memory ~ the coded index)
+    std::vector<int> poi;           // POI mode: index only these vertices (queries between them); empty = all
 };
 
 enum Storage { DENSE = 0, CODE16 = 1, COVER = 2, CODE8 = 3 };
@@ -102,6 +107,9 @@ class CertifiedIndex {
     std::map<std::string, double> timing;
     int64_t sweeps_mmp = 0, sweeps_vtp = 0;
 
+    std::vector<int32_t> slot_of;    // vertex -> row in anc / row / depth_of / near tables (-1: not indexed)
+    std::vector<int> poi_list;       // POI mode: the indexed vertices, ascending
+    int NP = 0;                      // indexed vertices
     std::vector<ShiftCopy> copies;   // shifted hierarchy
     Storage storage = DENSE;
     double cover_eps = 0;
@@ -113,11 +121,12 @@ class CertifiedIndex {
     // ellipse sub-mesh); returns true when it refined
     bool bounds_refined(int s, int t, double* out) const;
     double exact_pair(int s, int t, double ub) const;
-    void encode16(int bits = 16);    // builds the 16-bit (or 8-bit) coded labels (keeps the dense ones)
-    void build_covers(double eps_c); // builds eps_c-covers per row (keeps the dense labels)
+    void encode16(int bits = 16);    // builds the 16-bit (or 8-bit) coded labels (keeps the dense ones);
+                                     // cuts coded during the build (Options::store) are left as they are
+    void build_covers(double eps_c); // builds eps_c-covers per row (keeps the dense labels; needs them)
     size_t nbytes() const;           // bytes of what the current storage mode reads
     int64_t portals() const { int64_t k = 0; for (auto& c : cuts) k += c.K(); return k; }
-    int64_t labels() const { int64_t k = 0; for (auto& c : cuts) k += (int64_t)c.L.size(); return k; }
+    int64_t labels() const { int64_t k = 0; for (auto& c : cuts) k += (int64_t)c.M.size() * c.K(); return k; }
 
   private:
     void build_tree();
@@ -129,6 +138,18 @@ class CertifiedIndex {
     void eval_cut(const Cut& C, int s, int t, int rs, int rt, double* out) const;
     void cut_geometry();
     void labels_phase();
+    // one cut's label sub-mesh (portals inserted), its members' local ids and the solver choice
+    struct CutWork {
+        std::vector<double> V2, Xu;
+        std::vector<unsigned> F2, tgt;
+        std::vector<int> used, pidx;
+        size_t nfaces = 0;
+        bool vtp = false;
+    };
+    void prepare_cut(const Cut& C, Dijkstra& dij, CutWork& W) const;
+    Solver* cut_solver(const CutWork& W, bool& vtp) const;
+    void finish_cut(Cut& C, std::vector<float>& Lc, CutWork& W, int K);
+    bool encode_cut(Cut& C, int bits);
     void finalize_cut(Cut& C, std::vector<float>& Lc, std::vector<double>& Xu, int K);
     void near_phase();
     void feet_phase();

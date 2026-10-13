@@ -238,3 +238,20 @@ minimum. The query reconstructs $\ell^+(s,p) = \min_{q\in Q} \ell(s,q) + A(q,p)$
 admissible and $\le (1+\varepsilon_c)\,\mathrm{UB}_{\text{dense}}$) and $\ell^-(s,p) = \max_{q\in Q} \ell(s,q) - A(q,p) \le d(s,p)$,
 whose interval terms are still valid lower bounds (they only need labels $\le$ distances). The
 certificate stays sound; it widens with $\varepsilon_c$.
+
+**POI mode** (`Options::poi`). The tree, cuts, labels and near tables are built over a set $P$ of vertices
+only: regions are subsets of $P$, members are POIs, and near tables hold POI pairs within $R$. Nothing in
+§3 uses vertices outside the members:
+- the window lemma needs only $d(s,t) \le d(s,h) + d(h,t) \le 2\mu_C$ for members $s, t$;
+- Lemma 4 needs only the gaps;
+- the near-table radius argument is per pair.
+
+So Theorem 1 holds for every POI pair. Measured: sound on 1,000 random POI pairs per run
+(`results/poi/`).
+
+**Parallel build** (`Options::threads`). Each portal's sweep, each cut's geometry and each leaf's near
+table is computed independently of the others and written to its own slots, so the index is
+bit-identical for any thread count (checked on HorseMount: same portals, labels, near entries and
+per-pair bounds for 1 and 2 threads). **Coding during the build** (`Options::store`) applies the
+coding above to each cut as soon as its labels are final; it gives the same coded index as coding
+afterwards.

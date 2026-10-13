@@ -39,7 +39,11 @@ def main():
              "on it. `kd` = the current index; `kmax` = version A (portals per cut capped, certify-or-refine);",
              "`shifted` = 3 shifted quadtrees with gap max(g, eps lambda S / 6); storages: `dense` float32,",
              "`code16` / `code8` closed-loop delta coding, `coverX` = X-covers per row. Errors are |estimate/d - 1|",
-             "against exact MMP; `refined` = pairs answered by the exact local sweep because UB > (1+eps) LB.", ""]
+             "against exact MMP; `refined` = pairs answered by the exact local sweep because UB > (1+eps) LB.",
+             "The size-versus-error section has two series of (eps, g in edges): (0.1, 0.5), (0.2, 1), (0.3, 2),",
+             "(0.5, 4), (1, 8), where the near radius R = g/(eps lambda) grows from 5 to 8 edges, and (0.4, 2), (0.8, 4),",
+             "(1.6, 8), (3.2, 16) with R fixed at 5 edges. The plot shows every configuration and each storage's",
+             "Pareto front.", ""]
     for mesh, tag, pairs in (("Gunnison10k", "g10k", "1,500 pairs, eps 0.1, g 0.5 edge"), ("GunnisonForest100k", "g100k", "200 pairs, eps 0.2, g 1 edge")):
         rows = []
         for name in ("kd", "kmax200", "kmax100", "kmax50", "shifted"):
@@ -68,10 +72,17 @@ def main():
             import matplotlib.pyplot as plt
             fig, axes = plt.subplots(1, 3, figsize=(15, 4.4))
             for ax, mesh in zip(axes, ("HorseMount", "RobinsonMountain", "Gunnison10k")):
-                for var, mk in (("dense", "o"), ("code16", "s"), ("code8", "D")):
-                    rs = sorted([r for r in curve if r["mesh"] == mesh and r["variant"] == var], key=lambda r: r["mb"])
-                    if rs:
-                        ax.plot([r["mb"] for r in rs], [r["mean"] for r in rs], marker=mk, label=f"ours, {var}")
+                for k, (var, mk) in enumerate((("dense", "o"), ("code16", "s"), ("code8", "D"))):
+                    rs = sorted([r for r in curve if r["mesh"] == mesh and r["variant"] == var], key=lambda r: (r["mb"], r["mean"]))
+                    if not rs:
+                        continue
+                    # every configuration as a faint point, the Pareto front (smallest error for its size) as the line
+                    ax.scatter([r["mb"] for r in rs], [r["mean"] for r in rs], marker=mk, color=f"C{k}", alpha=0.3, s=18)
+                    front, best = [], float("inf")
+                    for r in rs:
+                        if r["mean"] < best:
+                            front.append(r); best = r["mean"]
+                    ax.plot([r["mb"] for r in front], [r["mean"] for r in front], marker=mk, color=f"C{k}", label=f"ours, {var} (Pareto front)")
                 comp = load(os.path.join(R, f"{mesh}_competitors.json")) or []
                 ear = sorted([c for c in comp if c["method"] == "EAR" and c["eps"] == 0.2], key=lambda c: c["index_MB"])
                 if ear:

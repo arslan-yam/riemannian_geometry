@@ -56,6 +56,26 @@ eps = 0.1 / g = 0.5e costs about 1.5x the build and 1.5x the index; eps = 0.05 a
 Queries stay at 0.2-0.6 us (cache misses grow with the index). The scale-dependent gap of `notes/research.md` §5.2 would make the 1.25M index only about 1.5x
 smaller with its current constants (estimate, not measured); it pays off beyond ~1M vertices.
 
+**Measured size options at 100k vertices** (eps 0.2, g 1 edge, 200 pairs, all sound, no pair refined;
+`notes/size_results.md`):
+
+| option | size | mean error | query |
+|---|---:|---:|---:|
+| float32 labels | 534 MB | 0.0069% | 0.38 µs |
+| 16-bit coded | 330 MB | 0.0069% | 1.3 µs |
+| 8-bit coded | 224 MB | 0.0075% | 1.3 µs |
+| cap 100 portals per cut, 8-bit | 198 MB | 0.017% | 1.1 µs |
+| cap 50, 8-bit | 177 MB | 0.041% | 0.64 µs |
+
+With 8-bit labels the projected index sizes drop by about 2.4×: about 0.75 GB at 250k vertices, 1.8 GB
+at 500k and 6 GB at 1.25M (caps at 50 portals: about 3×). Labels can now be coded as each cut is built
+(`--store code8`), so peak memory during the build is close to the coded size.
+
+**Timing caveat.** The 100k builds of the size runs took 41 min (kd), 51–52 min (caps 50/100) and 66 min
+(cap 200, which should equal kd), against 66 min for the earlier kd run. Other jobs were running on the
+machine and the process was niced, which on the M1 moves it onto efficiency cores. Sizes and errors are
+deterministic; build times need the clean rerun in §4 (`small` phase).
+
 ## 3. Projected costs of the competitors at those sizes
 
 * **EAR-Oracle**: ~4-10 h at 100k on a server (UP-Oracle paper: 9.9 h at 100k faces), tens of hours
@@ -73,6 +93,13 @@ smaller with its current constants (estimate, not measured); it pays off beyond 
 
 ## 4. Proposed server run list (single-threaded numbers, 1 core each, independent jobs)
 
+Implemented as `scripts/server/run_server.sh`, with the phases build, truth, ours, scale, threads, poi,
+competitors and small. Jobs run side by side with `xargs -P $JOBS`, each single-threaded except the
+`threads` phase. Labels are bit-identical for any thread count. On the M1, 2 threads gave 2.0× on
+HorseMount; the top cuts spread their portals over the threads and the rest go one cut per thread. The
+data are the UP-Oracle terrains already in `external/UpdatedStructureTerrainCode/input`: AU, GI, LH, SC,
+TJ and VS, each before and after an update, at 0.5M–2.5M faces, plus their POI files.
+
 | job | estimate |
 |---|---:|
 | our index, 5 small meshes x 3 configs + 2 x 100k x {0.2, 0.1} | ~6 h |
@@ -80,6 +107,7 @@ smaller with its current constants (estimate, not measured); it pays off beyond 
 | our index, one terrain at 1M / 1.5M / 2M / 2.5M faces (scaling curve) | ~100-150 h (or 2-4 h on 64 cores) |
 | EAR-Oracle on 100k (2 meshes) and 500k faces (2 terrains), sp=5 | ~40-80 h, >32 GB RAM |
 | UP-Oracle code, their POI settings on the 500k-face terrains (as in their paper) | ~10-20 h |
+| exact POI table (one VTP sweep per POI) vs our POI index, their POI files 50-2,500 | ~5-10 h |
 | DGG eps 1e-3 / 1e-4 on all terrains up to 2.5M faces | ~10 h |
 | NeuroGF on 2-3 terrains (GPU) | ~3-6 h |
 | ground truth: 1,000 exact pairs per terrain (MMP early stop / VTP) | ~5-20 h |

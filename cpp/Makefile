@@ -1,6 +1,6 @@
 # C++ implementation of the Certified Cut Index and its tools. `make` builds everything into bin/.
 CXX ?= c++
-CXXFLAGS ?= -O3 -std=c++17 -DNDEBUG -Wno-deprecated-declarations
+CXXFLAGS ?= -O3 -std=c++17 -DNDEBUG -Wno-deprecated-declarations -pthread
 KIR = -Ithird_party/kirsanov
 VTPI = -Ithird_party/vtp
 BIN = bin
