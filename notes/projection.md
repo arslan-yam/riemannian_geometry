@@ -67,7 +67,9 @@ smaller with its current constants (estimate, not measured); it pays off beyond 
 | cap 100 portals per cut, 8-bit | 198 MB | 0.017% | 1.1 µs |
 | cap 50, 8-bit | 177 MB | 0.041% | 0.64 µs |
 
-With 8-bit labels the projected index sizes drop by about 2.4×: about 0.75 GB at 250k vertices, 1.8 GB
+Since then, the near tables store each pair once (`sym`, lossless; 100k: 8-bit index 226 → 171 MB, 25%
+less), and coded queries are about 3× faster (100k: 1.31 → 0.45 µs). With 8-bit labels the projected
+index sizes drop by about 2.4× (about 3× with `sym`): about 0.75 GB at 250k vertices, 1.8 GB
 at 500k and 6 GB at 1.25M (caps at 50 portals: about 3×). Labels can now be coded as each cut is built
 (`--store code8`), so peak memory during the build is close to the coded size.
 
@@ -93,8 +95,20 @@ deterministic; build times need the clean rerun in §4 (`small` phase).
 
 ## 4. Proposed server run list (single-threaded numbers, 1 core each, independent jobs)
 
-Implemented as `scripts/server/run_server.sh`, with the phases build, truth, ours, scale, threads, poi,
-competitors and small. Jobs run side by side with `xargs -P $JOBS`, each single-threaded except the
+Implemented as `scripts/server/run_server.sh`, with the phases build, prepare, truth, ours, caps, scale,
+proximity, threads, poi, competitors and small.
+
+- **prepare:** one repaired, translated copy of each terrain, used by every method.
+- **Query sets** (per terrain, truths cached by the truth phase):
+  - random: 200 sources × 10 targets;
+  - distance bands: 3 targets per band from 100 sources;
+  - 2,000 near pairs;
+  - 200 A2A pairs.
+- **competitors:**
+  - EAR-Oracle, V2V and A2A, on our exported queries (TJ, GI at 500k faces);
+  - DGG at ε 1e-3 / 1e-4;
+  - the exact solvers' full sweeps;
+  - the UP-Oracle family in its POI setting. Jobs run side by side with `xargs -P $JOBS`, each single-threaded except the
 `threads` phase. Labels are bit-identical for any thread count. On the M1, 2 threads gave 2.0× on
 HorseMount; the top cuts spread their portals over the threads and the rest go one cut per thread. The
 data are the UP-Oracle terrains already in `external/UpdatedStructureTerrainCode/input`: AU, GI, LH, SC,

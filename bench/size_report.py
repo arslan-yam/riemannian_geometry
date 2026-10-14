@@ -17,6 +17,8 @@ def load(p):
 def rows_of(d, tag):
     out = []
     for v in d["variants"]:
+        if v.get("set", "random") != "random":  # the short-range pair set is reported in notes/near_results.md
+            continue
         out.append(dict(config=tag, variant=v["variant"] + ("+refine" if v["refine"] else ""), build=d["build_s"],
                         mb=v["index_bytes"] / 1e6, q=v["query_us"], qr=v["query_us_refine_mean"], qr99=v["query_us_refine_p99"],
                         refined=v["refined"], pairs=v["pairs"], sound=v["sound"], ub=v["max_ub_err"] * 100,

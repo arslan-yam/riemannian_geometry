@@ -223,6 +223,39 @@ queries take 0.4–1.3 µs; float32 queries take 0.3–0.5 µs.
   10 MB, because the near tables (≈ 90 entries per vertex, 8 bytes each, ≈ 7 MB) dominate. Coding the
   near-table ids as deltas and the distances in 8/16 bits is the next size step for the small-error regime.
 
+### 5.4 Near tables and decoding (2026-10-14; `results/near/`)
+
+The near tables were 35–70% of the 8-bit index. Measured (all answers sound; the random-pair errors
+of the float and 8-bit labels do not change):
+
+| near tables | HorseMount (ε 0.1) | Gunnison10k (ε 0.1) | GunnisonForest100k (ε 0.2) | near-pair error (mean / max, Gunnison10k) |
+|---|---:|---:|---:|---|
+| dense: int32 id + float32, both directions | 0.51 MB | 7.38 MB | 79 MB | exact |
+| `sym` (default): each pair once, varint id deltas, float32 | 0.16 MB | 2.32 MB | 25 MB | exact |
+| `sym16`: + 16-bit ratio to the chord | 0.10 MB | 1.45 MB | ≈ 16 MB | 0.0000% / 0.001% |
+| `sym8`: + 8-bit ratio | 0.07 MB | 0.99 MB | — | 0.005% / 0.18% |
+
+Whole index with 8-bit labels:
+- Gunnison10k: 17.9 → 12.9 MB (`sym`) → 11.5 MB (`sym8`).
+- GunnisonForest100k: 225.7 → 171.2 MB (`sym`) → 161.8 MB (`sym16`).
+- The coarse end of the size–error curve (Gunnison10k, ε 1.6): 10.6 → 4.6 MB (`sym16`, earlier absolute
+  coding).
+
+A near lookup now scans its row: 40–50 ns against 25 ns for the dense binary search.
+
+**Faster decoding of coded labels.** Three changes:
+- both rows are decoded in one pass;
+- runs are summed blockwise;
+- every minimum runs on four independent accumulators.
+
+| query time | float labels | 8-bit labels |
+|---|---|---|
+| Gunnison10k | 0.28 → 0.20 µs | 0.89 → 0.32 µs |
+| GunnisonForest100k | 0.38 → 0.28 µs | 1.31 → 0.45 µs |
+
+8-bit labels now cost about 1.6× a float query instead of 3×. (100k: the new run used 6 build threads,
+which does not change the index; the old numbers come from the single-thread size runs.)
+
 **Recommendation.** 1 (hybrid scale-dependent gap) is the change that alters the exponent while
 keeping everything the paper claims (theorem, certificates, $\mu$s queries); 2 and the label
 coding stack on it; VTP/hybrid sweeps and parallelism take the constant factors. A first

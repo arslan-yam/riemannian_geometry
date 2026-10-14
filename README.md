@@ -85,8 +85,10 @@ cpp/                        C++ implementation of the certified index (`make` ->
   src/solver_{mmp,vtp}.cpp  exact solvers: Kirsanov's MMP (early stop) and VTP (Qin et al. 2016)
   src/terrain.h, graph.h    mesh, face / vertex grids, face walk, mesh graph + Dijkstra
   tools/cci_bench.cpp       build + evaluate on vertex pairs against exact MMP
-  tools/cci_exp.cpp         size experiments: storages, caps, shifted hierarchy, POI mode / POI table,
-                            --threads N (bit-identical labels), --store code8 (coded during the build)
+  tools/cci_exp.cpp         experiments: storages, caps, shifted hierarchy, POI mode / POI table, near
+                            tables, query sets (sources x targets, distance bands, near pairs, A2A),
+                            --threads N (bit-identical labels), --export (competitors' query files)
+  tools/proximity.cpp       certified kNN / range queries vs exact on-the-fly search
   tools/solver_check.cpp    MMP vs VTP: exactness and speed
   tools/upo_static.cpp      the UP-Oracle authors' oracles behind a static many-query driver
   tools/dgg_bench.cpp       DGG (discrete geodesic graph) queries on a precomputed graph

@@ -5,10 +5,15 @@
 
 namespace cci {
 
+// a point on a face of the solver's mesh (x, y, z on the face's plane)
+struct SurfPt { unsigned face; double x, y, z; };
+
 struct Solver {
     virtual ~Solver() {}
     // exact geodesic distance from vertex src to every vertex in targets (out[i] for targets[i])
     virtual void dist(unsigned src, const std::vector<unsigned>& targets, double* out) = 0;
+    // exact geodesic distance from a surface point to surface points; false if the solver cannot (VTP)
+    virtual bool point_dists(const SurfPt&, const std::vector<SurfPt>&, double*) { return false; }
     virtual const char* name() const = 0;
 };
 

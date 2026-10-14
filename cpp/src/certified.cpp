@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <mutex>
 #include <numeric>
 #include <stdexcept>
@@ -58,6 +59,7 @@ CertifiedIndex::CertifiedIndex(const Terrain& t, const Options& o) : T(t), opt(o
         NP = (int)poi_list.size();
     }
     if (opt.store != "dense" && opt.store != "code16" && opt.store != "code8") throw std::invalid_argument("store: dense | code16 | code8");
+    near_mode_of(opt.near_store); // validates the name
     grid.init(T);
     pgrid.init(T.xy, std::max(Rq, T.edge));
     G.from_mesh(T);
@@ -73,6 +75,9 @@ CertifiedIndex::CertifiedIndex(const Terrain& t, const Options& o) : T(t), opt(o
     t0 = clk::now(); labels_phase(); timing["labels"] = secs(t0);
     t0 = clk::now(); near_phase(); timing["near_tables"] = secs(t0);
     t0 = clk::now(); feet_phase(); timing["feet"] = secs(t0);
+    if (opt.near_store != "dense") {
+        t0 = clk::now(); encode_near(near_mode_of(opt.near_store), false); timing["near_encode"] = secs(t0);
+    }
     if (opt.store == "code16") storage = CODE16;
     if (opt.store == "code8") storage = CODE8;
 }
@@ -498,6 +503,11 @@ void CertifiedIndex::finalize_cut(Cut& C, std::vector<float>& Lc, std::vector<do
     }
     C.gap.assign(K2 > 1 ? K2 - 1 : 0, INF);
     for (int j = 0; j + 1 < K2; ++j) if (rid[j + 1] == rid[j]) C.gap[j] = arcs[j + 1] - arcs[j];
+    C.run_beg.clear();
+    for (int j = 0; j < K2; ++j) if (j == 0 || rid[j] != rid[j - 1]) C.run_beg.push_back(j);
+    C.run_beg.push_back(K2);
+    C.lbsub.assign(K2, -INF);
+    for (int j = 1; j < K2; ++j) if (std::isfinite(C.gap[j - 1])) C.lbsub[j] = C.gap[j - 1];
     C.L = std::move(L2); C.X = std::move(X2); C.pos = std::move(pos); C.arc = std::move(arcs); C.run = std::move(rid);
 }
 
@@ -671,6 +681,7 @@ void CertifiedIndex::near_phase() {
     near_ptr.assign(NP + 1, 0);
     for (int i = 0; i < NP; ++i) near_ptr[i + 1] = near_ptr[i] + (int64_t)ids[i].size();
     near_ids.resize(near_ptr[NP]); near_d.resize(near_ptr[NP]);
+    near_total = near_ptr[NP];
     for (int i = 0; i < NP; ++i) {
         std::copy(ids[i].begin(), ids[i].end(), near_ids.begin() + near_ptr[i]);
         std::copy(dd[i].begin(), dd[i].end(), near_d.begin() + near_ptr[i]);
@@ -783,44 +794,69 @@ bool CertifiedIndex::select_cut(int s, int t, int& cid, int& rs, int& rt) const 
     return cid >= 0;
 }
 
-// LB, UB and estimate from one cut. f = s-row + t-row (dense, decoded 16-bit, or reconstructed from
+// out[k] = base + in[0] + ... + in[k] for k < m. Eight blocks are summed side by side (independent
+// chains), then shifted by the totals of the blocks before them: the additions are reordered with
+// respect to a plain running sum, which encode_cut allows for (its target margin delta)
+static void block_scan(const double* in, double* out, int m, double base) {
+    constexpr int B = 8;
+    const int L = m / B;
+    if (L < 4) {
+        double acc = base;
+        for (int k = 0; k < m; ++k) { acc += in[k]; out[k] = acc; }
+        return;
+    }
+    double acc[B] = {0, 0, 0, 0, 0, 0, 0, 0};
+    for (int k = 0; k < L; ++k)
+        for (int b = 0; b < B; ++b) { acc[b] += in[b * L + k]; out[b * L + k] = acc[b]; }
+    double off = base;
+    for (int b = 0; b < B; ++b) {
+        double* o = out + b * L;
+        for (int k = 0; k < L; ++k) o[k] += off;
+        off = o[L - 1];
+    }
+    for (int k = B * L; k < m; ++k) { off += in[k]; out[k] = off; }
+}
+
+// LB, UB and estimate from one cut. f = s-row + t-row (dense, decoded 8/16-bit, or reconstructed from
 // covers: upper reconstruction for UB and the estimate, lower reconstruction for the interval LB);
-// each LB term subtracts the per-label error bound of the storage
+// each LB term subtracts the per-label error bound of the storage (folded into lbsub_q)
 void CertifiedIndex::eval_cut(const Cut& C, int s, int t, int rs, int rt, double* out) const {
     auto chord = [&]() {
         const double *A = &T.V[3 * s], *B = &T.V[3 * t];
         return lam * std::sqrt(std::pow(A[0] - B[0], 2) + std::pow(A[1] - B[1], 2) + std::pow(A[2] - B[2], 2));
     };
-    int K = C.K();
-    thread_local std::vector<double> f, fl, err, a1, a2;
-    f.resize(std::max(K, 1)); fl.resize(std::max(K, 1)); err.assign(std::max(K, 1), 0.0);
-    double* flo = f.data(); // lower f for the LB terms (same array unless covers)
-    if (storage == DENSE || (storage == CODE16 && C.Lq.empty()) || (storage == CODE8 && C.Lq8.empty()) || (storage == COVER && C.cov_ptr.empty())) {
+    const int K = C.K();
+    thread_local std::vector<double> f, fl, inc;
+    f.resize(std::max(K, 1));
+    double* flo = f.data();                  // lower f for the LB terms (same array unless covers)
+    const double* sub = C.lbsub.data();      // LB term j: 0.5 (flo[j-1] + flo[j]) - sub[j]
+    const double* qerr = nullptr;            // coded storages: per-label decoding error bound
+    const bool dense = storage == DENSE || (storage == CODE16 && C.Lq.empty()) || (storage == CODE8 && C.Lq8.empty()) ||
+                       (storage == COVER && C.cov_ptr.empty());
+    if (dense) {
         const float *Ls = &C.L[(size_t)rs * K], *Lt = &C.L[(size_t)rt * K];
         for (int j = 0; j < K; ++j) f[j] = (double)Ls[j] + (double)Lt[j];
-    } else if (storage == CODE8) {
-        const int8_t *Qs = &C.Lq8[(size_t)rs * K], *Qt = &C.Lq8[(size_t)rt * K];
-        const float *As = &C.La[(size_t)rs * C.n_anchor], *At = &C.La[(size_t)rt * C.n_anchor];
-        double ds = 0, dt = 0;
-        int slot = 0;
-        for (int j = 0; j < K; ++j) {
-            if (j == 0 || C.run[j] != C.run[j - 1]) { ds = As[slot]; dt = At[slot]; ++slot; }
-            else { ds += Qs[j] * C.qstep[j]; dt += Qt[j] * C.qstep[j]; }
-            f[j] = ds + dt;
-            err[j] = 2 * C.qerr[j];
+    } else if (storage == CODE8 || storage == CODE16) {
+        // both rows at once: a run starts at the sum of the two anchors, then adds (code_s + code_t) * q_j
+        inc.resize(std::max(K, 1));
+        const double* q = C.qstep.data();
+        if (storage == CODE8) {
+            const int8_t *Qs = &C.Lq8[(size_t)rs * K], *Qt = &C.Lq8[(size_t)rt * K];
+            for (int j = 0; j < K; ++j) inc[j] = (double)((int)Qs[j] + (int)Qt[j]) * q[j];
+        } else {
+            const int16_t *Qs = &C.Lq[(size_t)rs * K], *Qt = &C.Lq[(size_t)rt * K];
+            for (int j = 0; j < K; ++j) inc[j] = (double)((int)Qs[j] + (int)Qt[j]) * q[j];
         }
-    } else if (storage == CODE16) {
-        const int16_t *Qs = &C.Lq[(size_t)rs * K], *Qt = &C.Lq[(size_t)rt * K];
         const float *As = &C.La[(size_t)rs * C.n_anchor], *At = &C.La[(size_t)rt * C.n_anchor];
-        double ds = 0, dt = 0;
-        int slot = 0;
-        for (int j = 0; j < K; ++j) {
-            if (j == 0 || C.run[j] != C.run[j - 1]) { ds = As[slot]; dt = At[slot]; ++slot; }
-            else { ds += Qs[j] * C.qstep[j]; dt += Qt[j] * C.qstep[j]; }
-            f[j] = ds + dt;
-            err[j] = 2 * C.qerr[j];
+        for (size_t r = 0; r + 1 < C.run_beg.size(); ++r) {
+            int b = C.run_beg[r], e = C.run_beg[r + 1];
+            f[b] = (double)As[r] + (double)At[r];
+            block_scan(&inc[b + 1], &f[b + 1], e - b - 1, f[b]);
         }
+        sub = C.lbsub_q.data();
+        qerr = C.qerr.data();
     } else { // covers
+        fl.resize(std::max(K, 1));
         auto recon = [&](int r, std::vector<double>& up, std::vector<double>& lo) {
             up.assign(K, INF); lo.assign(K, -INF);
             int b = C.cov_ptr[r], e = C.cov_ptr[r + 1];
@@ -847,27 +883,52 @@ void CertifiedIndex::eval_cut(const Cut& C, int s, int t, int rs, int rt, double
         for (int j = 0; j < K; ++j) { f[j] = us[j] + ut[j]; fl[j] = ls_[j] + lt[j]; }
         flo = fl.data();
     }
-    double ub = INF, lb = INF;
-    int imin = 0;
-    bool use_lb = exact && C.lb_ok;
-    for (int j = 0; j < K; ++j) {
-        if (f[j] < ub) { ub = f[j]; imin = j; }
-        if (use_lb && j > 0 && std::isfinite(C.gap[j - 1]))
-            lb = std::min(lb, 0.5 * (flo[j - 1] + flo[j]) - C.gap[j - 1] - 0.5 * (err[j - 1] + err[j]));
+    // UB = min f and LB = min of the interval terms, each with four independent running minima; coded
+    // storages also form the de-biased fe = f - qerr and its minimum in the same pass
+    thread_local std::vector<double> fe;
+    double u4[4] = {INF, INF, INF, INF}, m4[4] = {INF, INF, INF, INF};
+    int j = 0;
+    if (qerr) {
+        fe.resize(std::max(K, 1));
+        for (; j + 4 <= K; j += 4)
+            for (int k = 0; k < 4; ++k) {
+                fe[j + k] = f[j + k] - qerr[j + k];
+                u4[k] = std::min(u4[k], f[j + k]); m4[k] = std::min(m4[k], fe[j + k]);
+            }
+        for (; j < K; ++j) { fe[j] = f[j] - qerr[j]; u4[0] = std::min(u4[0], f[j]); m4[0] = std::min(m4[0], fe[j]); }
+    } else {
+        for (; j + 4 <= K; j += 4)
+            for (int k = 0; k < 4; ++k) u4[k] = std::min(u4[k], f[j + k]);
+        for (; j < K; ++j) u4[0] = std::min(u4[0], f[j]);
     }
-    if (use_lb) for (size_t e = 0; e < C.end_idx.size(); ++e) lb = std::min(lb, flo[C.end_idx[e]] - C.end_gap[e] - err[C.end_idx[e]]);
+    double ub = std::min(std::min(u4[0], u4[1]), std::min(u4[2], u4[3]));
+    int imin = 0;
+    for (int k = 0; k < K; ++k) if (f[k] == ub) { imin = k; break; }
+    double lb = INF;
+    const bool use_lb = exact && C.lb_ok;
+    if (use_lb) {
+        double l4[4] = {INF, INF, INF, INF};
+        int k = 1;
+        for (; k + 4 <= K; k += 4)
+            for (int i = 0; i < 4; ++i) l4[i] = std::min(l4[i], 0.5 * (flo[k + i - 1] + flo[k + i]) - sub[k + i]);
+        for (; k < K; ++k) l4[0] = std::min(l4[0], 0.5 * (flo[k - 1] + flo[k]) - sub[k]);
+        lb = std::min(std::min(l4[0], l4[1]), std::min(l4[2], l4[3]));
+        for (size_t e = 0; e < C.end_idx.size(); ++e) {
+            int64_t i = C.end_idx[e];
+            lb = std::min(lb, flo[i] - C.end_gap[e] - (qerr ? 2 * qerr[i] : 0.0));
+        }
+    }
     if (!use_lb || !std::isfinite(lb)) lb = 0;
     lb *= 1.0 - 2 * F32_REL;
     lb = std::max(lb, chord());
     double est = ub;
     if (opt.interp) {
-        if (storage == CODE8 || storage == CODE16) {
+        if (qerr) {
             // coded labels sit above the stored ones by half a quantum on average: the estimate (not the
             // bounds) is taken from the de-biased values
-            thread_local std::vector<double> fe;
-            fe.resize(std::max(K, 1));
+            double fmin = std::min(std::min(m4[0], m4[1]), std::min(m4[2], m4[3]));
             int ie = 0;
-            for (int j = 0; j < K; ++j) { fe[j] = f[j] - 0.5 * err[j]; if (fe[j] < fe[ie]) ie = j; }
+            while (ie < K - 1 && fe[ie] != fmin) ++ie;
             est = interp(C, fe.data(), K, ie, rs, rt);
         } else {
             est = interp(C, f.data(), K, imin, rs, rt);
@@ -876,22 +937,159 @@ void CertifiedIndex::eval_cut(const Cut& C, int s, int t, int rs, int rt, double
     out[0] = lb; out[1] = ub; out[2] = std::min(std::max(est, lb), ub);
 }
 
-void CertifiedIndex::bounds(int s, int t, double* out) const {
-    if (s == t) { out[0] = out[1] = out[2] = 0; return; }
-    const int32_t ss = slot_of[s];
-    if (ss < 0 || slot_of[t] < 0) { out[0] = 0; out[1] = out[2] = INF; return; } // POI mode: not indexed
-    double dx = T.xy[2 * s] - T.xy[2 * t], dy = T.xy[2 * s + 1] - T.xy[2 * t + 1];
-    if (dx * dx + dy * dy <= Rq * Rq) {
+// ---------------------------------------------------------------- near tables, compact
+double CertifiedIndex::near_chord(int u, int v) const {
+    const double *A = &T.V[3 * u], *B = &T.V[3 * v];
+    double dx = A[0] - B[0], dy = A[1] - B[1], dz = A[2] - B[2];
+    return lam * std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+CertifiedIndex::NearMode CertifiedIndex::near_mode_of(const std::string& name) {
+    if (name == "dense") return NEAR_DENSE;
+    if (name == "sym") return NEAR_SYM;
+    if (name == "sym16") return NEAR_SYM16;
+    if (name == "sym8") return NEAR_SYM8;
+    throw std::invalid_argument("near_store: dense | sym | sym16 | sym8");
+}
+
+// the decoded near distance of a code: chord (1 + code q), q a relative quantum. One out-of-line function
+// for the encoder and the query, so both round identically whatever the compiler does with fused
+// multiply-adds
+__attribute__((noinline)) static double near_decode(double chord, unsigned code, double q) { return chord * (1.0 + code * q); }
+
+static inline const uint8_t* read_varint(const uint8_t* p, uint64_t& v) {
+    v = 0;
+    int sh = 0;
+    uint8_t b;
+    do { b = *p++; v |= (uint64_t)(b & 127) << sh; sh += 7; } while (b & 128);
+    return p;
+}
+
+void CertifiedIndex::encode_near(NearMode mode, bool keep_dense) {
+    if (mode == NEAR_DENSE) { if (near_ptr.empty()) throw std::logic_error("encode_near: dense tables dropped"); near_mode = NEAR_DENSE; return; }
+    if (near_ptr.empty()) throw std::logic_error("encode_near: the dense near tables are gone");
+    std::vector<int> vert(NP);
+    for (int v = 0; v < T.n; ++v) if (slot_of[v] >= 0) vert[slot_of[v]] = v;
+    auto dense_find = [&](int r, int t) -> double {
+        auto b = near_ids.begin() + near_ptr[r], e = near_ids.begin() + near_ptr[r + 1];
+        auto it = std::lower_bound(b, e, t);
+        return (it != e && *it == t) ? (double)near_d[it - near_ids.begin()] : NAN;
+    };
+    std::vector<uint32_t> ptr(NP + 1, 0);
+    std::vector<uint8_t> bytes;
+    const bool coded = mode == NEAR_SYM16 || mode == NEAR_SYM8;
+    const unsigned cmax = mode == NEAR_SYM8 ? 255 : 65535;
+    const double head = mode == NEAR_SYM8 ? 240.0 : 60000.0; // headroom below cmax for the rounding fix-ups
+    std::vector<float> qs(coded ? NP : 0, 0.f);
+    std::vector<std::pair<int, float>> E;
+    std::vector<uint16_t> codes;
+    for (int r = 0; r < NP; ++r) {
+        const int u = vert[r];
+        // each pair once, in the row of its smaller vertex; both directions are rounded-up exact sweeps,
+        // so the larger of the two is kept (still an upper bound, within float32 of the distance)
+        E.clear();
+        for (int64_t k = near_ptr[r]; k < near_ptr[r + 1]; ++k) {
+            int t = near_ids[k];
+            if (t <= u) continue;
+            double d = near_d[k], d2 = dense_find(slot_of[t], u);
+            if (std::isfinite(d2)) d = std::max(d, d2);
+            E.push_back({t, (float)d}); // d is a float32 value already
+        }
+        if (coded && !E.empty()) {
+            // relative quantum: the row's largest ratio d / chord - 1 over head steps, so every pair of the
+            // row is within one quantum (relative) of its distance
+            double mx = 0;
+            for (auto& e : E) {
+                double ch = near_chord(u, e.first);
+                if (!(ch > 0)) throw std::logic_error("encode_near: coincident vertices");
+                mx = std::max(mx, (double)e.second / ch - 1.0);
+            }
+            float qf = f32_up(std::max(mx, 1e-6) / head);
+            for (;;) { // codes: the least c with chord (1 + c q) >= d (the headroom makes a retry very unlikely)
+                codes.assign(E.size(), 0);
+                bool ok = true;
+                for (size_t i = 0; i < E.size() && ok; ++i) {
+                    double ch = near_chord(u, E[i].first), d = E[i].second;
+                    double c = std::max(0.0, std::ceil((d / ch - 1.0) / (double)qf));
+                    if (c > cmax + 2.0) { ok = false; break; }
+                    while (near_decode(ch, (unsigned)c, qf) < d) c += 1;
+                    while (c > 0 && near_decode(ch, (unsigned)(c - 1), qf) >= d) c -= 1;
+                    if (c > cmax) ok = false; else codes[i] = (uint16_t)c;
+                }
+                if (ok) break;
+                qf *= 2;
+            }
+            qs[r] = qf;
+        }
+        int64_t prev = u;
+        for (size_t i = 0; i < E.size(); ++i) {
+            uint64_t dlt = (uint64_t)(E[i].first - prev);
+            prev = E[i].first;
+            do { uint8_t b = dlt & 127; dlt >>= 7; bytes.push_back(b | (dlt ? 128 : 0)); } while (dlt);
+            if (mode == NEAR_SYM) { uint8_t buf[4]; std::memcpy(buf, &E[i].second, 4); bytes.insert(bytes.end(), buf, buf + 4); }
+            else if (mode == NEAR_SYM16) { uint8_t buf[2]; std::memcpy(buf, &codes[i], 2); bytes.insert(bytes.end(), buf, buf + 2); }
+            else bytes.push_back((uint8_t)codes[i]);
+        }
+        if (bytes.size() > 0xFFFFFFFFull) throw std::length_error("encode_near: more than 4 GB of near tables");
+        ptr[r + 1] = (uint32_t)bytes.size();
+    }
+    nz_ptr = std::move(ptr); nz_bytes = std::move(bytes); nz_q = std::move(qs);
+    near_mode = mode;
+    if (!keep_dense) { std::vector<int64_t>().swap(near_ptr); std::vector<int32_t>().swap(near_ids); std::vector<float>().swap(near_d); }
+}
+
+// near pair (planar distance <= Rq): its exact (or decoded) distance, if the tables have it
+bool CertifiedIndex::near_lookup(int s, int t, double* out) const {
+    if (near_mode == NEAR_DENSE) {
+        const int32_t ss = slot_of[s];
         auto b0 = near_ids.begin() + near_ptr[ss], b1 = near_ids.begin() + near_ptr[ss + 1];
         auto it = std::lower_bound(b0, b1, t);
-        if (it != b1 && *it == t) {
-            double d = near_d[it - near_ids.begin()];
-            const double *A = &T.V[3 * s], *B = &T.V[3 * t];
-            out[0] = exact ? d * (1.0 - F32_REL) : lam * std::sqrt(std::pow(A[0] - B[0], 2) + std::pow(A[1] - B[1], 2) + std::pow(A[2] - B[2], 2));
-            out[1] = out[2] = d;
-            return;
-        }
+        if (it == b1 || *it != t) return false;
+        double d = near_d[it - near_ids.begin()];
+        out[0] = exact ? d * (1.0 - F32_REL) : near_chord(s, t);
+        out[1] = out[2] = d;
+        return true;
     }
+    const int u = std::min(s, t), v = std::max(s, t);
+    const int32_t r = slot_of[u];
+    const uint8_t *p = nz_bytes.data() + nz_ptr[r], *e = nz_bytes.data() + nz_ptr[r + 1];
+    const size_t vb = near_mode == NEAR_SYM ? 4 : near_mode == NEAR_SYM16 ? 2 : 1;
+    int64_t id = u;
+    while (p < e) {
+        uint64_t dlt;
+        p = read_varint(p, dlt);
+        id += (int64_t)dlt;
+        if (id > v) return false;
+        if (id < v) { p += vb; continue; }
+        if (near_mode == NEAR_SYM) {
+            float d; std::memcpy(&d, p, 4);
+            out[0] = exact ? d * (1.0 - F32_REL) : near_chord(u, v);
+            out[1] = out[2] = d;
+        } else {
+            unsigned c;
+            if (near_mode == NEAR_SYM16) { uint16_t c16; std::memcpy(&c16, p, 2); c = c16; } else c = *p;
+            double q = nz_q[r], ch = near_chord(u, v), D = near_decode(ch, c, q);
+            // c is the least code: decode(c) >= the stored distance > decode(c - 1) (or c = 0 and D = chord),
+            // so LB from decode(c - 1), the estimate halfway between
+            double Dm = c > 0 ? near_decode(ch, c - 1, q) : ch;
+            double lb = exact ? std::max(ch, Dm * (1.0 - F32_REL)) : ch;
+            out[0] = lb; out[1] = D; out[2] = std::min(std::max(0.5 * (D + Dm), lb), D);
+        }
+        return true;
+    }
+    return false;
+}
+
+size_t CertifiedIndex::near_bytes() const {
+    if (near_mode == NEAR_DENSE) return near_ids.size() * 4 + near_d.size() * 4 + near_ptr.size() * 8;
+    return nz_bytes.size() + nz_ptr.size() * 4 + nz_q.size() * 4;
+}
+
+void CertifiedIndex::bounds(int s, int t, double* out) const {
+    if (s == t) { out[0] = out[1] = out[2] = 0; return; }
+    if (slot_of[s] < 0 || slot_of[t] < 0) { out[0] = 0; out[1] = out[2] = INF; return; } // POI mode: not indexed
+    double dx = T.xy[2 * s] - T.xy[2 * t], dy = T.xy[2 * s + 1] - T.xy[2 * t + 1];
+    if (dx * dx + dy * dy <= Rq * Rq && near_lookup(s, t, out)) return;
     int cid, rs, rt;
     if (!select_cut(s, t, cid, rs, rt)) { out[0] = 0; out[1] = out[2] = INF; return; }
     eval_cut(cuts[cid], s, t, rs, rt, out);
@@ -915,6 +1113,84 @@ double CertifiedIndex::exact_pair(int s, int t, double ub) const {
     return d;
 }
 
+void CertifiedIndex::exact_from(int s, const std::vector<int>& Tg, double ub, double* out) const {
+    if (Tg.empty()) return;
+    double R = ub / (2.0 * lam) + 1e-6 * T.edge;
+    double lo[2] = {T.xy[2 * s], T.xy[2 * s + 1]}, hi[2] = {lo[0], lo[1]};
+    for (int t : Tg) for (int k = 0; k < 2; ++k) { lo[k] = std::min(lo[k], T.xy[2 * t + k]); hi[k] = std::max(hi[k], T.xy[2 * t + k]); }
+    std::vector<int> faces = grid.in_box(lo[0] - R, hi[0] + R, lo[1] - R, hi[1] + R);
+    std::vector<double> V2, Xu; std::vector<unsigned> F2; std::vector<int> used, pidx;
+    double along[2] = {1, 0};
+    submesh(faces, {}, along, V2, F2, used, pidx, Xu);
+    auto loc = [&](int v) { return (unsigned)(std::lower_bound(used.begin(), used.end(), v) - used.begin()); };
+    std::unique_ptr<Solver> sol(make_mmp(V2, F2, true));
+    std::vector<unsigned> tg(Tg.size());
+    for (size_t i = 0; i < Tg.size(); ++i) tg[i] = loc(Tg[i]);
+    sol->dist(loc(s), tg, out);
+}
+
+// exact distance between two surface points: MMP from p (a surface point of its face) stopped at q, on
+// the faces meeting bbox(p, q) dilated by ub / (2 lambda). Without inserted points the sub-mesh keeps
+// the order of `faces`, so a face's local id is its position there
+double CertifiedIndex::exact_points(const APoint& p, const APoint& q, double ub) const {
+    double R = ub / (2.0 * lam) + 1e-6 * T.edge;
+    double lo[2] = {std::min(p.x, q.x) - R, std::min(p.y, q.y) - R}, hi[2] = {std::max(p.x, q.x) + R, std::max(p.y, q.y) + R};
+    std::vector<int> faces = grid.in_box(lo[0], hi[0], lo[1], hi[1]);
+    auto lf = [&](int f) -> int {
+        auto it = std::lower_bound(faces.begin(), faces.end(), f);
+        return (it != faces.end() && *it == f) ? (int)(it - faces.begin()) : -1;
+    };
+    int fp = lf(p.f), fq = lf(q.f);
+    if (fp < 0 || fq < 0) return NAN;
+    std::vector<double> V2, Xu; std::vector<unsigned> F2; std::vector<int> used, pidx;
+    double along[2] = {1, 0};
+    submesh(faces, {}, along, V2, F2, used, pidx, Xu);
+    std::unique_ptr<Solver> sol(make_mmp(V2, F2, true));
+    SurfPt a{(unsigned)fp, p.x, p.y, T.z_at(p.f, p.x, p.y)};
+    std::vector<SurfPt> b{{(unsigned)fq, q.x, q.y, T.z_at(q.f, q.x, q.y)}};
+    double d = NAN;
+    if (!sol->point_dists(a, b, &d)) return NAN;
+    return d;
+}
+
+bool CertifiedIndex::a2a_bounds(const APoint& p, const APoint& q, double* out) const {
+    const double P[3] = {p.x, p.y, T.z_at(p.f, p.x, p.y)}, Q[3] = {q.x, q.y, T.z_at(q.f, q.x, q.y)};
+    int A[3], B[3];
+    double da[3], db[3], wp[3], wq[3];
+    for (int i = 0; i < 3; ++i) {
+        A[i] = (int)T.F[3 * p.f + i]; B[i] = (int)T.F[3 * q.f + i];
+        const double *a = &T.V[3 * A[i]], *b = &T.V[3 * B[i]];
+        // the straight segment inside the face is a path: upper bounds of d(p, a_i), d(q, b_j)
+        da[i] = T.w[p.f] * std::sqrt((a[0] - P[0]) * (a[0] - P[0]) + (a[1] - P[1]) * (a[1] - P[1]) + (a[2] - P[2]) * (a[2] - P[2]));
+        db[i] = T.w[q.f] * std::sqrt((b[0] - Q[0]) * (b[0] - Q[0]) + (b[1] - Q[1]) * (b[1] - Q[1]) + (b[2] - Q[2]) * (b[2] - Q[2]));
+    }
+    bary(T, p.f, p.x, p.y, wp); bary(T, q.f, q.x, q.y, wq);
+    for (int i = 0; i < 3; ++i) { wp[i] = std::min(1.0, std::max(0.0, wp[i])); wq[i] = std::min(1.0, std::max(0.0, wq[i])); }
+    double ub = INF, lb = -INF, est = 0;
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) {
+            double o[3] = {0, 0, 0};
+            if (A[i] != B[j]) bounds(A[i], B[j], o);
+            ub = std::min(ub, da[i] + o[1] + db[j]);
+            lb = std::max(lb, o[0] - da[i] - db[j]);
+            est += wp[i] * wq[j] * o[2];
+        }
+    double ch = lam * std::sqrt((P[0] - Q[0]) * (P[0] - Q[0]) + (P[1] - Q[1]) * (P[1] - Q[1]) + (P[2] - Q[2]) * (P[2] - Q[2]));
+    lb = std::max(lb, ch);
+    const bool near = std::hypot(p.x - q.x, p.y - q.y) <= Rq;
+    const bool loose = ub > (1.0 + 2.0 * eps) * lb;
+    bool refined = false;
+    if (exact && (near || loose)) {
+        double d = exact_points(p, q, std::isfinite(ub) ? ub : 4 * lam * std::hypot(p.x - q.x, p.y - q.y) + 10 * T.edge);
+        if (std::isfinite(d)) {
+            lb = std::max(lb, d * (1 - 1e-9)); ub = std::min(ub, d * (1 + 1e-9)); est = d;
+            refined = loose && !near;
+        }
+    }
+    out[0] = lb; out[1] = ub; out[2] = std::min(std::max(est, lb), ub);
+    return refined;
+}
+
 bool CertifiedIndex::bounds_refined(int s, int t, double* out) const {
     bounds(s, t, out);
     if (s == t || out[1] <= (1.0 + eps) * out[0]) return false;
@@ -936,13 +1212,16 @@ bool CertifiedIndex::encode_cut(Cut& C, int bits) {
     float Lmax = 0;
     for (float x : C.L) if (std::isfinite(x)) Lmax = std::max(Lmax, x);
     double ulp = std::ldexp((double)Lmax, -22); // a float32 anchor's error, generously
+    // the query sums the steps blockwise (block_scan), not in the encoder's order: each label is coded
+    // for its value + delta, which absorbs the reordering (~K ulps of Lmax, far below delta)
+    double delta = std::ldexp((double)Lmax, -30);
     C.qstep.assign(K, 0.0); C.qerr.assign(K, ulp);
     C.n_anchor = 0;
     for (int j = 0; j < K; ++j) {
         if (j == 0 || C.run[j] != C.run[j - 1]) { C.n_anchor++; continue; }
         double A = C.arc[j] - C.arc[j - 1];
         C.qstep[j] = (A * (1 + 1e-6) + C.qerr[j - 1] + 4 * ulp) / qmax;
-        C.qerr[j] = C.qstep[j];
+        C.qerr[j] = C.qstep[j] + 2 * delta;
     }
     if (bits == 8) { C.Lq8.assign(nm * K, 0); C.Lq.clear(); } else { C.Lq.assign(nm * K, 0); C.Lq8.clear(); }
     C.La.assign(nm * C.n_anchor, 0.f);
@@ -956,14 +1235,16 @@ bool CertifiedIndex::encode_cut(Cut& C, int bits) {
                 C.La[r * C.n_anchor + slot++] = Lr[j];
                 dec = Lr[j];
             } else {
-                double q = std::ceil(((double)Lr[j] - dec) / C.qstep[j]);
+                double q = std::ceil(((double)Lr[j] + delta - dec) / C.qstep[j]);
                 if (q < qmin || q > qmax || !std::isfinite(q)) { ok = false; break; } // cannot happen (1-Lipschitz rows)
                 if (bits == 8) C.Lq8[r * K + j] = (int8_t)q; else C.Lq[r * K + j] = (int16_t)q;
                 dec += q * C.qstep[j];
             }
         }
     }
-    if (!ok) { C.Lq.clear(); C.Lq8.clear(); C.La.clear(); } // this cut stays dense
+    if (!ok) { C.Lq.clear(); C.Lq8.clear(); C.La.clear(); return false; } // this cut stays dense
+    C.lbsub_q.assign(K, -INF);
+    for (int j = 1; j < K; ++j) if (C.lbsub[j] > -INF) C.lbsub_q[j] = C.lbsub[j] + C.qerr[j - 1] + C.qerr[j];
     return ok;
 }
 
@@ -1021,15 +1302,18 @@ void CertifiedIndex::build_covers(double eps_c) {
 size_t CertifiedIndex::nbytes() const {
     size_t b = 0;
     for (auto& C : cuts) {
-        if (storage == CODE16 && !C.Lq.empty()) b += C.Lq.size() * 2 + C.La.size() * 4 + C.qstep.size() * 8;
-        else if (storage == CODE8 && !C.Lq8.empty()) b += C.Lq8.size() + C.La.size() * 4 + C.qstep.size() * 8;
+        bool coded = false;
+        if (storage == CODE16 && !C.Lq.empty()) { b += C.Lq.size() * 2; coded = true; }
+        else if (storage == CODE8 && !C.Lq8.empty()) { b += C.Lq8.size(); coded = true; }
         else if (storage == COVER && !C.cov_ptr.empty()) b += C.cov_idx.size() * 6 + C.cov_ptr.size() * 4;
         else b += C.L.size() * 4;
-        b += C.arc.size() * 8 + C.run.size() * 8 + C.gap.size() * 8 + C.X.size() * 8;
+        if (coded) b += C.La.size() * 4 + C.qstep.size() * 8 + C.qerr.size() * 8 + C.lbsub_q.size() * 8;
+        else b += C.lbsub.size() * 8;
+        b += C.arc.size() * 8 + C.run.size() * 8 + C.run_beg.size() * 4 + C.X.size() * 8;
         b += C.end_idx.size() * 16 + 1;
         b += C.foot_r.size() * 4 + C.foot_arc.size() * 4 + C.foot_run.size() * 2;
     }
-    b += near_ids.size() * 4 + near_d.size() * 4 + near_ptr.size() * 8;
+    b += near_bytes();
     b += anc.size() * 4 + row.size() * 4;
     if (!poi_list.empty()) b += slot_of.size() * 4; // vertex -> POI row
     for (auto& Cp : copies) b += Cp.anc.size() * 4 + Cp.row.size() * 4 + Cp.nodes.size() * sizeof(ShiftNode);

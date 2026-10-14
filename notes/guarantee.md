@@ -255,3 +255,55 @@ bit-identical for any thread count (checked on HorseMount: same portals, labels,
 per-pair bounds for 1 and 2 threads). **Coding during the build** (`Options::store`) applies the
 coding above to each cut as soon as its labels are final; it gives the same coded index as coding
 afterwards.
+
+**Compact near tables** (`Options::near_store`, `encode_near`; default `sym`). A near pair is stored
+once, in the row of its smaller vertex, as (varint id delta, distance). The two directions of a pair
+come from two exact sweeps, each rounded up to float32. We keep the larger, which is still $\ge d$ and
+within float32 of it, so the dense LB $d(1-2^{-22})$ stays valid (`sym`, lossless).
+
+With `sym16` / `sym8` the distance is a 16 / 8-bit code $c$ of its ratio to the chord. The decoded value
+is $D(c) = \chi\,(1 + c\,q)$, where:
+- $\chi = \lambda|S-T|_{3D} \le d$ is the chord;
+- $q$ is a per-row relative quantum (the row's largest $d/\chi - 1$ over 60000 or 240 steps, rounded up to
+  float32);
+- $c$ is the least code with $D(c) \ge$ the stored value.
+
+One out-of-line function computes $D$ for the encoder and the query, so both round identically. Then
+- $\mathrm{UB} = D(c) \ge d$;
+- $D(c-1) <$ the stored value (or $c = 0$ and $D = \chi$), so $\mathrm{LB} = \max(\chi, D(c-1)(1-2^{-22})) \le d$;
+- the estimate is $\tfrac12(D(c) + D(c-1))$.
+
+Every pair is within one relative quantum of its distance. Measured on 3,000 near pairs on Gunnison10k:
+
+| mode | max UB error | mean / max estimate error |
+|---|---:|---|
+| `sym16` | 0.001% | — / 0.001% |
+| `sym8` | 0.37% | 0.005% / 0.18% |
+
+**Blockwise decoding of coded labels** (`eval_cut`, `block_scan`). The query sums a run's steps in
+eight independent blocks and then shifts each block by the totals before it. The additions are
+therefore reordered relative to the encoder's running sum, and the decoded value can differ from the
+encoder's by a few ulps per step. To keep "decoded ≥ stored", `encode_cut` codes every label for
+$L + \delta$ with $\delta = L_{\max}2^{-30}$, which is far larger than $K$ ulps of $L_{\max}$ for any
+realistic $K$. Its error bound becomes $q_j + 2\delta$, which the LB subtracts.
+
+**A2A in C++** (`CertifiedIndex::a2a_bounds`). The bounds are those of §7. The exact refine runs MMP from
+the surface point itself (Kirsanov's `SurfacePoint` on its face), with no point inserted into the
+sub-mesh, so there is no move and no slack term. The early stop stays exact for surface points:
+Kirsanov's rule takes each target's closest vertex $v$ and stops only once the queue is beyond
+$d(v) + |{\rm target} - v| \ge d({\rm target})$.
+
+**Certified proximity queries** (`cpp/tools/proximity.cpp`). For a query vertex $q$ and objects $O$:
+- **Candidates.** Every object with $d \le \tau$ satisfies $\lambda|q - o| \le \tau$, because
+  $d \ge \lambda \cdot$ chart distance. So a grid query of radius $\tau/\lambda$ finds all candidates.
+- **kNN.** $\tau$ is the $k$-th smallest UB among the objects first found. A candidate is
+  - surely in when fewer than $k$ other candidates have LB below its UB;
+  - surely out when at least $k$ candidates have UB below its LB.
+
+  The remaining candidates get exact distances from one MMP sweep from $q$ on the faces meeting their
+  bounding box dilated by $\max \mathrm{UB}/(2\lambda)$ (ellipse lemma). The top-$k$ is then the
+  surely-in set plus the nearest of those exact distances.
+- **Range $r$.** $\tau = r$. In if $\mathrm{UB} \le r$, out if $\mathrm{LB} > r$, the rest exact.
+
+Both answer sets are exact, so a wrong answer is a bug. Measured: every answer matched the exact one
+(HorseMount, TJpre_1058).

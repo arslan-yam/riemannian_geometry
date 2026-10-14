@@ -6,7 +6,7 @@ VTPI = -Ithird_party/vtp
 BIN = bin
 OBJ = $(BIN)/obj
 
-all: $(BIN)/solver_check $(BIN)/cci_bench $(BIN)/cci_exp
+all: $(BIN)/solver_check $(BIN)/cci_bench $(BIN)/cci_exp $(BIN)/proximity
 
 # competitors (their code, not part of `all`): the UP-Oracle authors' oracles behind a static driver
 UPO ?= ../external/UpdatedStructureTerrainCode/src
@@ -28,6 +28,19 @@ $(BIN)/cci_bench: tools/cci_bench.cpp $(OBJ)/certified.o $(OBJ)/solver_mmp.o $(O
 
 $(BIN)/cci_exp: tools/cci_exp.cpp $(OBJ)/certified.o $(OBJ)/solver_mmp.o $(OBJ)/solver_vtp.o src/mesh_io.h
 	$(CXX) $(CXXFLAGS) $< $(OBJ)/certified.o $(OBJ)/solver_mmp.o $(OBJ)/solver_vtp.o -o $@
+
+$(BIN)/proximity: tools/proximity.cpp $(OBJ)/certified.o $(OBJ)/solver_mmp.o $(OBJ)/solver_vtp.o src/mesh_io.h
+	$(CXX) $(CXXFLAGS) $< $(OBJ)/certified.o $(OBJ)/solver_mmp.o $(OBJ)/solver_vtp.o -o $@
+
+# DGG baseline (authors' code, ported in ../external/dgg_port; not part of `all`)
+DGG ?= ../external/dgg_port
+DGGSHIM ?= ../external/dgg_shim
+dgg: $(BIN)/dgg_precompute $(BIN)/dgg_bench
+$(BIN)/dgg_precompute: $(wildcard $(DGG)/DGG_precompute/*.cpp) $(wildcard $(DGG)/ICH/*.cpp)
+	@mkdir -p $(BIN); $(CXX) -O2 -std=c++14 -w -include cfloat -include climits -include cmath -include cstring \
+	  -I$(DGG) -I$(DGG)/ICH -I$(DGG)/DGG_precompute -I$(DGGSHIM) $^ -o $@
+$(BIN)/dgg_bench: tools/dgg_bench.cpp
+	@mkdir -p $(BIN); $(CXX) -O3 -std=c++14 -w -I$(DGG) $< -o $@
 
 clean:
 	rm -rf $(BIN)

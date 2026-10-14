@@ -654,6 +654,41 @@ to the hub takes the face walk and the portal's face corners plus their graph di
   thread. The index is bit-identical for any thread count.
 * `Options::store` (`code16` / `code8`): each cut is coded (`encode_cut`) right after `finalize_cut` and its
   float32 labels are freed, so peak memory is close to the coded index. Covers need the float32 labels.
+* `Options::near_store` (`dense` / `sym` (default) / `sym16` / `sym8`; `--near-store`, or `--near-variants`
+  in `cci_exp` to evaluate several on one build). `encode_near` writes one byte stream per row: each pair
+  once, in the row of its smaller vertex, as (varint delta of the vertex id, float32 or a uint16 / uint8
+  code). The `sym16` / `sym8` codes are the ratio to the chord, with a per-row relative quantum.
+  `cci_exp --near-pairs N` adds a second query set of pairs within the near radius (truth cached next to
+  the main one), reported as `[near pairs]` and stored with `"set": "near"` in the JSON. `near_lookup` scans the row and stops at
+  the first id beyond the target (about 50 entries, 40–50 ns against 25 ns for the dense binary search).
+* Coded-label queries (`eval_cut`):
+  - one vectorizable pass forms (code_s + code_t)·q_j;
+  - `block_scan` adds each run up in eight independent blocks, then shifts the blocks;
+  - UB, LB and the de-biased minimum use four running minima each, so no long dependency chain is left.
+
+  `run_beg`, `lbsub` (gaps, $-\infty$ across runs) and `lbsub_q` (gaps plus decoding errors) are
+  precomputed per cut. The near pairs exercise the near tables.
+* **Query sets in `cci_exp`.** All vertex sets get their exact truth from one MMP sweep per distinct
+  source, shared across sets and cached per set.
+  - `--sources S --per-source k`: S random sources × k targets.
+  - `--buckets k`: distance bands [0, R], (R, 2R], (2R, 4R], … up to the diameter, k targets per band
+    from each of the first `--bucket-sources` sources.
+  - `--near-pairs N`.
+  - `--a2a-sources S --a2a-per-source k`: random face, uniform barycentric coordinates. The truth is MMP
+    from the source surface point on the whole mesh (`Solver::point_dists`).
+  - `--export prefix` writes the competitors' query files: `prefix.{V2V,A2A}.query` in the harness
+    format, in the mesh's original coordinates, with vertex queries 5 cm inside a face. It also writes
+    the exact truths (`.truth`) and the vertex pairs (`.V2V.pairs`, for DGG).
+* **`CertifiedIndex::a2a_bounds`** (certified A2A, §7 of `guarantee.md`) and **`exact_from`** (one
+  early-stopping sweep from a vertex to many vertices on an ellipse sub-mesh, used for kNN and range
+  refinement).
+* **`tools/proximity.cpp`**: certified kNN and range queries against one exact full sweep per query
+  vertex.
+* **Competitor tooling.**
+  - `scripts/competitors/prepare_mesh.py`: repair and translate a mesh for every method alike.
+  - `scripts/competitors/harness_eval.py`: scores the EAR harness logs against the exported truth.
+  - `make -C cpp dgg`: the DGG port, `dgg_precompute` + `dgg_bench`.
+  - `scripts/server/dgg_one.sh`: one DGG run on a prepared terrain.
 * `Options::poi`: rows of `anc` / `row` / `depth_of` / the near tables are indexed by `slot_of[v]`
   (identity without POIs); a query on a non-POI vertex returns $[0, \infty]$.
 * Competitor drivers: `upo_static.cpp` (the UP-Oracle authors' oracles built once, many POI queries;

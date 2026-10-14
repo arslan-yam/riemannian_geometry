@@ -14,7 +14,7 @@ def main():
         except (json.JSONDecodeError, FileNotFoundError):
             continue
         mesh = os.path.basename(d["mesh"]).replace(".off", "")
-        v = {x["variant"]: x for x in d["variants"]}
+        v = {x["variant"]: x for x in d["variants"] if x.get("set", "random") == "random"}
         t = d.get("poi_table", {})
         rows.append((mesh, d["n"], d["pois"], t, d["build_s"], v))
     order = {"HorseMount": 0, "RobinsonMountain": 1, "Gunnison10k": 2}

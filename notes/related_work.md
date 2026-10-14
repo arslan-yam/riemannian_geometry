@@ -83,9 +83,14 @@ because lower and upper bounds on terrain distance already exist.
   - query $O(\varepsilon^{-1}\log\frac1\varepsilon + \log\log n)$
   - the constants depend on the weight ratio and on the smallest face angle
 
-  **Not yet verified:** the full text (the LANL host refused connections from here), the exact
-  technique (we expect Steiner points plus planar-oracle portals/covers à la Thorup), and whether there
-  is any implementation (we know of none).
+  Checked against the Springer page (ESA 2011, LNCS 6942, doi 10.1007/978-3-642-23719-5_49; the full
+  text is paywalled). The bounds above are confirmed. Their reference list points to the technique:
+  - Steiner points (Aleksandrov–Maheshwari–Sack, JACM 2005);
+  - planar distance oracles with path separators and portals (Thorup, JACM 2004; Klein, SODA 2002;
+    Kawarabayashi–Klein–Sommer, ICALP 2011; Abraham–Gavoille, PODC 2006);
+  - r-divisions (Fakcharoenphol–Rao).
+
+  The page lists no experiments, and we know of no implementation.
 
 **Where they beat us, and what we offer.** Asymptotically, Djidjev–Sommer's near-linear space beats our
 guaranteed index ($\sim n^{1.5}$ labels). Near-linear space by itself is therefore not a claim we can make

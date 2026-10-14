@@ -39,6 +39,7 @@ int main(int argc, char** argv) {
         else if (a == "--interp") opt.interp = std::stoi(nx());
         else if (a == "--threads") opt.threads = std::stoi(nx());
         else if (a == "--store") opt.store = nx();
+        else if (a == "--near-store") opt.near_store = nx();
     }
     std::vector<double> V; std::vector<unsigned> F;
     read_off(mesh, V, F);
@@ -120,7 +121,7 @@ int main(int argc, char** argv) {
         std::ofstream o(json);
         o << "{\"mesh\":\"" << mesh << "\",\"n\":" << T.n << ",\"faces\":" << T.m << ",\"eps\":" << opt.eps << ",\"gap_factor\":" << opt.gap_factor
           << ",\"solver\":\"" << opt.solver << "\",\"build_s\":" << tb << ",\"index_bytes\":" << ix.nbytes() << ",\"query_us\":" << best * 1e6
-          << ",\"cuts\":" << ix.cuts.size() << ",\"portals\":" << ix.portals() << ",\"labels\":" << ix.labels() << ",\"near_entries\":" << ix.near_ids.size()
+          << ",\"cuts\":" << ix.cuts.size() << ",\"portals\":" << ix.portals() << ",\"labels\":" << ix.labels() << ",\"near_entries\":" << ix.near_total
           << ",\"sweeps_mmp\":" << ix.sweeps_mmp << ",\"sweeps_vtp\":" << ix.sweeps_vtp << ",\"timing\":{";
         bool first = true;
         for (auto& kv : ix.timing) { o << (first ? "" : ",") << "\"" << kv.first << "\":" << kv.second; first = false; }
