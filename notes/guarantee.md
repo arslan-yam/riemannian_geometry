@@ -307,3 +307,32 @@ $d(v) + |{\rm target} - v| \ge d({\rm target})$.
 
 Both answer sets are exact, so a wrong answer is a bug. Measured: every answer matched the exact one
 (HorseMount, TJpre_1058).
+
+**Certified approximate kNN and range (no refine).**
+- **kNN.** Return the $k$ candidates of smallest UB. Every true top-$k$ object $o$ has
+  $\mathrm{UB}(o) \le (1+\varepsilon)d(o) \le (1+\varepsilon)d_k$, so the $k$-th smallest UB is
+  $\tau \le (1+\varepsilon)d_k$. Every returned object therefore has $d \le \mathrm{UB} \le \tau \le (1+\varepsilon)d_k$:
+  the standard $\varepsilon$-approximate kNN.
+- **Range $r$.** Return the objects with $\mathrm{UB} \le r$. There are no false positives, and every
+  object with $d \le r/(1+\varepsilon)$ is returned.
+
+Both cost one candidate pass, with no exact sweep. Measured on HorseMount:
+- kNN, $k = 50$: 27 µs against 0.5 ms for the exact answer and 0.85 ms for the pruned on-the-fly search;
+  recall 99.4%, worst $d/d_k = 1.027$.
+- Range: no false positives, and nothing missed within $r/(1+\varepsilon)$.
+
+**Weighted terrains in C++** (`--solver steiner`, `src/steiner.h`). One Steiner graph is built for the
+terrain (m points per edge, chains at the cheaper adjacent weight, straight in-face segments at
+$w_f\times$ length) and shared by every search.
+- **Labels.** A portal's labels come from a Dijkstra seeded at the boundary nodes of its face (at
+  $w_f\times$ the straight distance), stopped once every member is settled. They are costs of real
+  paths, so $\ell(u,p) \ge d(u,p)$ and $\mathrm{UB} \ge d$ holds as before.
+- **LB.** The labels are not exact, so the interval LB falls back to the chord bound $\lambda|S-T|$
+  (as in Python), and nothing is refined exactly.
+- **A2A.** Near pairs take a Steiner search between the two points, which only lowers the UB.
+- **Reference.** There is no exact solver, so the truth is a finer Steiner graph (`--truth-steiner M`),
+  itself an upper bound. Soundness is checked for the LB only, and a UB below the reference is counted
+  as a path the reference missed.
+- **Measured.** Weighted HorseMount (the competitors' weights), ε 0.1, against Steiner m = 24: estimate
+  mean error 0.38% (m = 5) and 0.23% (m = 10). The Python version gave 0.35% / 0.20% against the best
+  path of any method.

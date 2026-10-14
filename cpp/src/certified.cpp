@@ -1,6 +1,7 @@
 #include "certified.h"
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -27,6 +28,28 @@ template <class F> static void parallel_for(int nt, size_t n, F&& body) {
         for (size_t i; (i = next++) < n;) body(i, tid);
     });
 }
+
+// memory budget for solvers alive at once: acquire blocks until the estimate fits (or nothing else is
+// held, so one oversized solver still runs alone)
+struct MemGate {
+    std::mutex m;
+    std::condition_variable cv;
+    double cap = 0, used = 0;
+    int holders = 0;
+    void acquire(double b) {
+        if (cap <= 0) return;
+        std::unique_lock<std::mutex> l(m);
+        cv.wait(l, [&] { return holders == 0 || used + b <= cap; });
+        used += b; ++holders;
+    }
+    void release(double b) {
+        if (cap <= 0) return;
+        { std::lock_guard<std::mutex> l(m); used -= b; --holders; }
+        cv.notify_all();
+    }
+};
+static double solver_bytes(size_t faces, bool vtp) { return (double)faces * (vtp ? 700.0 : 1600.0) * 1.2; }
+static double steiner_bytes(size_t faces, int m) { return (double)faces * steiner_bytes_per_face(m) * 1.2; }
 
 // numpy.interp for increasing xp
 static double interp1(double x, const std::vector<double>& xp, const std::vector<double>& fp) {
@@ -60,6 +83,10 @@ CertifiedIndex::CertifiedIndex(const Terrain& t, const Options& o) : T(t), opt(o
     }
     if (opt.store != "dense" && opt.store != "code16" && opt.store != "code8") throw std::invalid_argument("store: dense | code16 | code8");
     near_mode_of(opt.near_store); // validates the name
+    exact = opt.solver != "steiner";
+    if (opt.solver != "steiner" && opt.solver != "mmp" && opt.solver != "vtp" && opt.solver != "hybrid") throw std::invalid_argument("solver: mmp | vtp | hybrid | steiner");
+    if (exact && std::any_of(T.w.begin(), T.w.end(), [](double x) { return x != 1.0; }))
+        throw std::invalid_argument("weighted terrain: MMP / VTP ignore face weights; use solver steiner");
     grid.init(T);
     pgrid.init(T.xy, std::max(Rq, T.edge));
     G.from_mesh(T);
@@ -72,6 +99,12 @@ CertifiedIndex::CertifiedIndex(const Terrain& t, const Options& o) : T(t), opt(o
     timing["setup"] = secs(t0);
     t0 = clk::now(); if (opt.hierarchy == "shifted") build_shifted(); else build_tree(); timing["tree"] = secs(t0);
     t0 = clk::now(); cut_geometry(); timing["cut_geometry"] = secs(t0);
+    if (opt.solver == "steiner") {
+        t0 = clk::now();
+        sg.reset(new SteinerGraph());
+        sg->build(T.V, T.F, T.w, opt.steiner_m);
+        timing["steiner_graph"] = secs(t0);
+    }
     t0 = clk::now(); labels_phase(); timing["labels"] = secs(t0);
     t0 = clk::now(); near_phase(); timing["near_tables"] = secs(t0);
     t0 = clk::now(); feet_phase(); timing["feet"] = secs(t0);
@@ -382,7 +415,8 @@ void CertifiedIndex::cut_geometry() {
 // ---------------------------------------------------------------- labels
 void CertifiedIndex::submesh(const std::vector<int>& faces, const std::vector<double>& X, const double* along,
                              std::vector<double>& V2, std::vector<unsigned>& F2, std::vector<int>& used,
-                             std::vector<int>& pidx, std::vector<double>& Xu) const {
+                             std::vector<int>& pidx, std::vector<double>& Xu, std::vector<double>* W2) const {
+    if (W2) W2->clear();
     // local vertices
     used.clear();
     for (int f : faces) for (int k = 0; k < 3; ++k) used.push_back((int)T.F[3 * f + k]);
@@ -440,7 +474,7 @@ void CertifiedIndex::submesh(const std::vector<int>& faces, const std::vector<do
     for (size_t fi = 0; fi < faces.size(); ++fi) {
         int f = faces[fi];
         unsigned c0 = loc(T.F[3 * f]), c1 = loc(T.F[3 * f + 1]), c2 = loc(T.F[3 * f + 2]);
-        if (per_face[fi].empty()) { F2.push_back(c0); F2.push_back(c1); F2.push_back(c2); continue; }
+        if (per_face[fi].empty()) { F2.push_back(c0); F2.push_back(c1); F2.push_back(c2); if (W2) W2->push_back(T.w[f]); continue; }
         std::vector<unsigned> tri{c0, c1, c2};
         for (int j : per_face[fi]) {
             unsigned p = (unsigned)pidx[j];
@@ -455,6 +489,7 @@ void CertifiedIndex::submesh(const std::vector<int>& faces, const std::vector<do
             tri.insert(tri.end(), {B, C, p, C, A, p}); // (B, C, p), (C, A, p)
         }
         F2.insert(F2.end(), tri.begin(), tri.end());
+        if (W2) W2->insert(W2->end(), tri.size() / 3, T.w[f]); // the split triangles keep the face's weight
     }
     // one orientation for every triangle (counter-clockwise in the chart): VTP's window lists need
     // consistently oriented faces and abort otherwise; distances do not depend on it
@@ -545,7 +580,7 @@ void CertifiedIndex::prepare_cut(const Cut& C, Dijkstra& dij, CutWork& W) const 
     for (int j = 0; j < K; ++j) for (int k = 0; k < 2; ++k) { blo[k] = std::min(blo[k], C.X[2 * j + k]); bhi[k] = std::max(bhi[k], C.X[2 * j + k]); }
     std::vector<int> faces = grid.in_box(blo[0] - R, bhi[0] + R, blo[1] - R, bhi[1] + R);
     double along[2] = {0, 0}; along[1 - a] = 1.0;
-    submesh(faces, C.X, along, W.V2, W.F2, W.used, W.pidx, W.Xu);
+    submesh(faces, C.X, along, W.V2, W.F2, W.used, W.pidx, W.Xu, &W.W2);
     W.tgt.resize(nm);
     for (size_t r = 0; r < nm; ++r) W.tgt[r] = (unsigned)(std::lower_bound(W.used.begin(), W.used.end(), C.M[r]) - W.used.begin());
     W.vtp = opt.solver == "vtp";
@@ -558,6 +593,7 @@ void CertifiedIndex::prepare_cut(const Cut& C, Dijkstra& dij, CutWork& W) const 
 
 // VTP on the sub-mesh, or MMP with early stop (also when VTP rejects the sub-mesh)
 Solver* CertifiedIndex::cut_solver(const CutWork& W, bool& vtp) const {
+    if (opt.solver == "steiner") { vtp = false; return make_steiner(W.V2, W.F2, W.W2, opt.steiner_m); }
     Solver* s = vtp ? make_vtp(W.V2, W.F2) : nullptr;
     if (!s) { vtp = false; s = make_mmp(W.V2, W.F2, true); }
     return s;
@@ -577,6 +613,8 @@ void CertifiedIndex::labels_phase() {
     const int nt = std::max(1, opt.threads);
     std::atomic<int64_t> n_mmp{0}, n_vtp{0};
     std::mutex log_mu;
+    MemGate gate;
+    gate.cap = opt.solver_mem_mb * 1e6;
     std::vector<Dijkstra> dijs(nt, Dijkstra(G));
     auto report = [&](size_t cid, const Cut& C, int K, bool vtp) {
         if (!opt.verbose || cid % 100 != 0) return;
@@ -584,10 +622,34 @@ void CertifiedIndex::labels_phase() {
         std::fprintf(stderr, "  cut %zu/%zu: %zu members, %d portals, sub-mesh %d faces, %s\n", cid, cuts.size(), C.M.size(), K, C.submesh_faces, vtp ? "VTP" : "MMP");
     };
     // portals of cut cid swept by `workers` threads (the calling thread alone when workers == 1)
+    std::vector<SteinerGraph::State> sstates(sg ? nt : 0);
     auto do_cut = [&](size_t cid, int tid, int workers) {
         Cut& C = cuts[cid];
         int K = C.K();
         if (K == 0) { std::vector<float> L0; std::vector<double> X0; finalize_cut(C, L0, X0, 0); return; }
+        if (sg) { // weighted: one search per portal on the shared Steiner graph, seeded at its face's nodes
+            size_t nm = C.M.size();
+            std::vector<float> Lc(nm * K, std::numeric_limits<float>::infinity());
+            std::vector<int32_t> stop(C.M.begin(), C.M.end());
+            std::atomic<int> next{0};
+            run_threads(workers, [&](int w) {
+                SteinerGraph::State& S = sstates[workers == 1 ? tid : w];
+                SteinerGraph::Seeds seeds;
+                for (int j; (j = next++) < K;) {
+                    double x = C.X[2 * j], y = C.X[2 * j + 1];
+                    int f = locate(T, grid, x, y);
+                    if (f < 0) continue; // not on the mesh: the portal is dropped by finalize_cut
+                    sg->point_seeds(f, x, y, T.z_at(f, x, y), seeds);
+                    sg->search(S, seeds, stop);
+                    for (size_t r = 0; r < nm; ++r) Lc[r * K + j] = f32_up(S.D[C.M[r]]);
+                    n_mmp++; // counted with the MMP sweeps (not VTP)
+                }
+            });
+            CutWork W; W.Xu = C.X; W.nfaces = 0;
+            finish_cut(C, Lc, W, K);
+            report(cid, C, K, false);
+            return;
+        }
         CutWork W;
         prepare_cut(C, dijs[tid], W);
         size_t nm = C.M.size();
@@ -596,6 +658,8 @@ void CertifiedIndex::labels_phase() {
         std::vector<char> vtp_used(workers, 0);
         run_threads(workers, [&](int w) {
             bool vtp = W.vtp;
+            const double mem = opt.solver == "steiner" ? steiner_bytes(W.F2.size() / 3, opt.steiner_m) : solver_bytes(W.F2.size() / 3, W.vtp);
+            gate.acquire(mem);
             std::unique_ptr<Solver> sol(cut_solver(W, vtp));
             vtp_used[w] = vtp;
             std::vector<double> out(nm);
@@ -605,6 +669,8 @@ void CertifiedIndex::labels_phase() {
                 for (size_t r = 0; r < nm; ++r) Lc[r * K + j] = f32_up(out[r]);
                 (vtp ? n_vtp : n_mmp)++;
             }
+            sol.reset();
+            gate.release(mem);
         });
         C.used_vtp = vtp_used[0];
         finish_cut(C, Lc, W, K);
@@ -632,8 +698,23 @@ void CertifiedIndex::near_phase() {
     std::vector<std::vector<float>> dd(NP);
     const int nt = std::max(1, opt.threads);
     std::vector<Dijkstra> dijs(nt, Dijkstra(G));
+    std::vector<SteinerGraph::State> sstates(sg ? nt : 0);
     parallel_for(nt, leaves.size(), [&](size_t li, int tid) {
         const auto& M = leaves[li];
+        if (sg) { // weighted: searches on the shared Steiner graph
+            SteinerGraph::State& S = sstates[tid];
+            for (int s : M) {
+                std::vector<int32_t> Tg;
+                for (int t : pgrid.radius(T.xy[2 * s], T.xy[2 * s + 1], Rq)) if (t != s && slot_of[t] >= 0) Tg.push_back(t);
+                if (Tg.empty()) continue;
+                sg->search(S, {{(int32_t)s, 0.0}}, Tg);
+                int32_t r = slot_of[s];
+                ids[r].assign(Tg.begin(), Tg.end());
+                dd[r].resize(Tg.size());
+                for (size_t k = 0; k < Tg.size(); ++k) dd[r][k] = f32_up(S.D[Tg[k]]);
+            }
+            return;
+        }
         Dijkstra& dij = dijs[tid];
         std::vector<double> V2, Xu, out;
         std::vector<unsigned> F2;
@@ -662,8 +743,9 @@ void CertifiedIndex::near_phase() {
         for (int u : allt) for (int k = 0; k < 2; ++k) { blo[k] = std::min(blo[k], T.xy[2 * u + k]); bhi[k] = std::max(bhi[k], T.xy[2 * u + k]); }
         std::vector<int> faces = grid.in_box(blo[0] - R, bhi[0] + R, blo[1] - R, bhi[1] + R);
         double along[2] = {1, 0};
-        submesh(faces, {}, along, V2, F2, used, pidx, Xu);
-        std::unique_ptr<Solver> sol(make_mmp(V2, F2, true));
+        std::vector<double> W2;
+        submesh(faces, {}, along, V2, F2, used, pidx, Xu, &W2);
+        std::unique_ptr<Solver> sol(local_solver(V2, F2, W2));
         auto loc = [&](int v) { return (unsigned)(std::lower_bound(used.begin(), used.end(), v) - used.begin()); };
         for (size_t i = 0; i < M.size(); ++i) {
             int s = M[i];
@@ -1095,9 +1177,24 @@ void CertifiedIndex::bounds(int s, int t, double* out) const {
     eval_cut(cuts[cid], s, t, rs, rt, out);
 }
 
+int CertifiedIndex::answering_cut(int s, int t) const {
+    double dx = T.xy[2 * s] - T.xy[2 * t], dy = T.xy[2 * s + 1] - T.xy[2 * t + 1];
+    double o[3];
+    if (dx * dx + dy * dy <= Rq * Rq && near_lookup(s, t, o)) return -1;
+    int cid, rs, rt;
+    return select_cut(s, t, cid, rs, rt) ? cid : -2;
+}
+
 // exact distance of a pair: one early-stopping MMP sweep on the faces meeting bbox(s, t) dilated by
 // ub / (2 lambda) (the ellipse lemma: every path of length <= ub stays inside)
+// the solver of a local sub-mesh: exact MMP with early stop, or the Steiner graph on a weighted terrain
+Solver* CertifiedIndex::local_solver(const std::vector<double>& V2, const std::vector<unsigned>& F2, const std::vector<double>& W2) const {
+    if (opt.solver == "steiner") return make_steiner(V2, F2, W2, opt.steiner_m);
+    return make_mmp(V2, F2, true);
+}
+
 double CertifiedIndex::exact_pair(int s, int t, double ub) const {
+    if (!exact) return NAN; // no exact solver for weighted terrains
     double R = ub / (2.0 * lam) + 1e-6 * T.edge;
     double lo[2], hi[2];
     for (int k = 0; k < 2; ++k) { lo[k] = std::min(T.xy[2 * s + k], T.xy[2 * t + k]) - R; hi[k] = std::max(T.xy[2 * s + k], T.xy[2 * t + k]) + R; }
@@ -1115,6 +1212,7 @@ double CertifiedIndex::exact_pair(int s, int t, double ub) const {
 
 void CertifiedIndex::exact_from(int s, const std::vector<int>& Tg, double ub, double* out) const {
     if (Tg.empty()) return;
+    if (!exact) { std::fill(out, out + Tg.size(), (double)NAN); return; }
     double R = ub / (2.0 * lam) + 1e-6 * T.edge;
     double lo[2] = {T.xy[2 * s], T.xy[2 * s + 1]}, hi[2] = {lo[0], lo[1]};
     for (int t : Tg) for (int k = 0; k < 2; ++k) { lo[k] = std::min(lo[k], T.xy[2 * t + k]); hi[k] = std::max(hi[k], T.xy[2 * t + k]); }
@@ -1133,6 +1231,7 @@ void CertifiedIndex::exact_from(int s, const std::vector<int>& Tg, double ub, do
 // the faces meeting bbox(p, q) dilated by ub / (2 lambda). Without inserted points the sub-mesh keeps
 // the order of `faces`, so a face's local id is its position there
 double CertifiedIndex::exact_points(const APoint& p, const APoint& q, double ub) const {
+    if (!exact) return NAN;
     double R = ub / (2.0 * lam) + 1e-6 * T.edge;
     double lo[2] = {std::min(p.x, q.x) - R, std::min(p.y, q.y) - R}, hi[2] = {std::max(p.x, q.x) + R, std::max(p.y, q.y) + R};
     std::vector<int> faces = grid.in_box(lo[0], hi[0], lo[1], hi[1]);
@@ -1180,6 +1279,19 @@ bool CertifiedIndex::a2a_bounds(const APoint& p, const APoint& q, double* out) c
     const bool near = std::hypot(p.x - q.x, p.y - q.y) <= Rq;
     const bool loose = ub > (1.0 + 2.0 * eps) * lb;
     bool refined = false;
+    if (!exact && sg && near) {
+        // weighted: no exact solver, and the interval is always wide (the LB is the chord bound), so only
+        // near pairs, where the corner routes are poor, get a Steiner search between the two points (a
+        // path: it can only lower the UB)
+        thread_local SteinerGraph::State S;
+        SteinerGraph::Seeds seeds;
+        sg->point_seeds(p.f, P[0], P[1], P[2], seeds);
+        std::vector<int32_t> stop(&sg->fpts[(size_t)q.f * sg->B()], &sg->fpts[(size_t)q.f * sg->B()] + sg->B());
+        sg->search(S, seeds, stop);
+        double d = sg->point_dist(S, q.f, Q[0], Q[1], Q[2]);
+        if (p.f == q.f) d = std::min(d, T.w[p.f] * std::sqrt((P[0] - Q[0]) * (P[0] - Q[0]) + (P[1] - Q[1]) * (P[1] - Q[1]) + (P[2] - Q[2]) * (P[2] - Q[2])));
+        if (d < ub) { ub = d; est = d; }
+    }
     if (exact && (near || loose)) {
         double d = exact_points(p, q, std::isfinite(ub) ? ub : 4 * lam * std::hypot(p.x - q.x, p.y - q.y) + 10 * T.edge);
         if (std::isfinite(d)) {

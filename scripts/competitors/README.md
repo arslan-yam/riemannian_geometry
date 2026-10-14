@@ -18,6 +18,12 @@ The harness targets Linux/CGAL 5. Patches needed (all mechanical):
 5. CGAL 6: `boost::optional` -> `std::optional`, `boost::get<Point>(&x)` -> `std::get_if<Point>(&x)` in `base.h`.
 
 Then `cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-I$PWD/../shim" && make` in `bld/`.
+The patch is portable:
+- the macOS memory reader sits under `#ifdef __APPLE__`, and Linux keeps the original `/proc` code;
+- the CGAL 6 calls (`std::optional`, `std::get_if`) are chosen by `CGAL_VERSION_NR`, and CGAL 5 keeps boost.
+
+On Linux, `git apply harness.patch` and a plain `cmake .. -DCMAKE_BUILD_TYPE=Release && make` (no shim)
+build it; see `scripts/server/README.md`.
 `harness.patch` in this folder is the complete diff (`git apply` it in a fresh clone at 2343aa9); the clone
 used for the results lives in the gitignored `external/weighted_distance_oracle`.
 

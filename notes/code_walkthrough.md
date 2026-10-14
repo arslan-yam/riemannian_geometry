@@ -652,6 +652,13 @@ to the hub takes the face walk and the portal's face corners plus their graph di
   threads; the remaining cuts are handed out one per thread, shallowest first. `cut_geometry` and
   `near_phase` run one cut or leaf per thread. `FaceGrid::in_box` keeps its de-duplication marks per
   thread. The index is bit-identical for any thread count.
+
+  **Solver memory.** One thread holds one solver at a time. Measured after a full sweep: MMP 1.4 KB and
+  VTP 0.65 KB per sub-mesh face. With N threads, the top cuts (portals split over the threads) hold N
+  copies on the same large sub-mesh. `Options::solver_mem_mb` (`--solver-mem-gb`) bounds the solvers
+  alive at once: a thread waits (`MemGate`) before building a solver that would exceed it, estimating
+  1.6 / 0.7 KB per face × 1.2. On Gunnison10k with 4 threads, a 20 MB budget cut the peak RSS from 210
+  to 67 MB with an identical index (the build took 211 s instead of 97 s, mostly serial).
 * `Options::store` (`code16` / `code8`): each cut is coded (`encode_cut`) right after `finalize_cut` and its
   float32 labels are freed, so peak memory is close to the coded index. Covers need the float32 labels.
 * `Options::near_store` (`dense` / `sym` (default) / `sym16` / `sym8`; `--near-store`, or `--near-variants`
@@ -689,6 +696,15 @@ to the hub takes the face walk and the portal's face corners plus their graph di
   - `scripts/competitors/harness_eval.py`: scores the EAR harness logs against the exported truth.
   - `make -C cpp dgg`: the DGG port, `dgg_precompute` + `dgg_bench`.
   - `scripts/server/dgg_one.sh`: one DGG run on a prepared terrain.
+* **Weighted terrains** (`--weights file --solver steiner --steiner-m 5`, truth `--truth-steiner M`).
+  - `src/steiner.h` / `solver_steiner.cpp`: `SteinerGraph` (CSR; node ids: the vertices, then m points
+    per edge) with per-thread `State` searches that stop once the targets are settled, `point_seeds` /
+    `point_dist` for surface points, and the `Solver` interface over a graph of its own (whole-mesh
+    truth, sub-meshes).
+  - The index builds one graph per terrain. `labels_phase` and `near_phase` search it directly, with no
+    sub-mesh, and `exact` is false: the LB is the chord bound and nothing is refined exactly.
+  - `scripts/competitors/make_weights.py` writes uniform(1, 5) face weights in the harness's
+    `face_weight.query` format.
 * `Options::poi`: rows of `anc` / `row` / `depth_of` / the near tables are indexed by `slot_of[v]`
   (identity without POIs); a query on a non-POI vertex returns $[0, \infty]$.
 * Competitor drivers: `upo_static.cpp` (the UP-Oracle authors' oracles built once, many POI queries;

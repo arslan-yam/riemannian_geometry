@@ -10,6 +10,7 @@
 // --random 0 with --near-pairs N evaluates the near pairs only.
 //                [--sources S --per-source 10] [--buckets k --bucket-sources 100] [--a2a-sources S --a2a-per-source 5]
 //                [--export prefix]   (prefix.{V2V,A2A}.{query,truth} for the competitors' harness)
+//                [--weights f --solver steiner --steiner-m 5 --truth-steiner 24]   (weighted terrain)
 // POI mode indexes only the POIs and draws the query pairs among them; --poi-table also builds the plain
 // exact baseline (one full VTP sweep per POI, a P x P float32 table) and times it.
 #include <algorithm>
@@ -43,7 +44,8 @@ int main(int argc, char** argv) {
     Options opt;
     int nrand = 1000, seed = 7, poi_random = 0, poi_seed = 11, near_pairs = 0;
     int n_sources = 0, per_source = 10, buckets = 0, bucket_sources = 100, a2a_sources = 0, a2a_per_source = 5;
-    std::string poi_file, near_variants, near_truth_cache, export_prefix;
+    std::string poi_file, near_variants, near_truth_cache, export_prefix, interp_variants, weights_file;
+    int truth_steiner = 0;
     bool refine = false, poi_table = false, truth_only = false;
     for (int i = 2; i < argc; ++i) {
         std::string a = argv[i];
@@ -64,6 +66,7 @@ int main(int argc, char** argv) {
         else if (a == "--json") json = nx();
         else if (a == "--verbose") opt.verbose = true;
         else if (a == "--threads") opt.threads = std::stoi(nx());
+        else if (a == "--solver-mem-gb") opt.solver_mem_mb = 1e3 * std::stod(nx());
         else if (a == "--store") opt.store = nx();
         else if (a == "--near-store") opt.near_store = nx();
         else if (a == "--near-variants") near_variants = nx();  // dense,sym,sym16: evaluated on one build
@@ -76,6 +79,10 @@ int main(int argc, char** argv) {
         else if (a == "--a2a-sources") a2a_sources = std::stoi(nx()); // A2A set = points x --a2a-per-source
         else if (a == "--a2a-per-source") a2a_per_source = std::stoi(nx());
         else if (a == "--export") export_prefix = nx();               // harness query files + exact truths
+        else if (a == "--interp-variants") interp_variants = nx();     // 0,1,2: estimate interpolation, one build
+        else if (a == "--weights") weights_file = nx();               // face weights, one per line (weighted terrain)
+        else if (a == "--steiner-m") opt.steiner_m = std::stoi(nx()); // weighted: Steiner points per edge of the labels
+        else if (a == "--truth-steiner") truth_steiner = std::stoi(nx()); // weighted: reference = Steiner graph, M points per edge
         else if (a == "--poi-random") poi_random = std::stoi(nx());
         else if (a == "--poi-seed") poi_seed = std::stoi(nx());
         else if (a == "--poi-file") poi_file = nx();
@@ -86,7 +93,18 @@ int main(int argc, char** argv) {
     std::vector<double> V; std::vector<unsigned> F;
     double origin[2] = {0, 0};
     read_off(mesh, V, F, origin);
-    Terrain T; T.init(V, F);
+    std::vector<double> weights;
+    if (!weights_file.empty()) {
+        std::ifstream in(weights_file); double x;
+        while (in >> x) weights.push_back(x);
+        if (weights.size() != F.size() / 3) { std::fprintf(stderr, "%zu weights for %zu faces\n", weights.size(), F.size() / 3); return 1; }
+    }
+    Terrain T; T.init(V, F, weights.empty() ? nullptr : &weights);
+    const bool weighted = !weights.empty();
+    if (weighted && truth_steiner <= 0) { std::fprintf(stderr, "weighted terrain: no exact solver; give --truth-steiner M (reference Steiner graph)\n"); return 1; }
+    // the solver of the truth: exact MMP (early stop), or on a weighted terrain a fine Steiner graph (a
+    // reference: graph distances are upper bounds that converge to the weighted distance)
+    auto truth_solver = [&]() -> Solver* { return truth_steiner > 0 ? make_steiner(T.V, T.F, T.w, truth_steiner) : make_mmp(T.V, T.F, true); };
     if (poi_random > 0) {
         std::mt19937_64 rng(poi_seed);
         std::vector<int> all(T.n);
@@ -111,6 +129,8 @@ int main(int argc, char** argv) {
     std::vector<PairSet> sets;
     const double g_ = opt.gap > 0 ? opt.gap : opt.gap_factor * T.edge, Rnear = g_ / (opt.eps * T.lam) * (1.0 + 1e-9);
     std::vector<int> srcs; // the random sources (sources mode), reused by the bands
+    // the near pairs and the bands depend on the near radius: it is part of their cache names
+    char rtag[32]; std::snprintf(rtag, sizeof rtag, ".R%.3g", Rnear / T.edge);
     {
         PairSet R; R.name = "random"; R.cache = truth_cache;
         std::vector<double> given;
@@ -140,7 +160,7 @@ int main(int argc, char** argv) {
     PointGrid pg; pg.init(T.xy, std::max(Rnear, T.edge));
     if (near_pairs > 0) {
         PairSet N; N.name = "near";
-        N.cache = !near_truth_cache.empty() ? near_truth_cache : (truth_cache.empty() ? "" : truth_cache + ".near" + std::to_string(near_pairs));
+        N.cache = !near_truth_cache.empty() ? near_truth_cache : (truth_cache.empty() ? "" : truth_cache + ".near" + std::to_string(near_pairs) + rtag);
         std::mt19937_64 rng(seed + 1);
         const bool poi = !opt.poi.empty();
         auto is_poi = [&](int v) { return std::binary_search(opt.poi.begin(), opt.poi.end(), v); };
@@ -164,7 +184,7 @@ int main(int argc, char** argv) {
         for (double lo = Rnear; lo < diam; lo *= 2) bands.push_back({lo, std::min(2 * lo, diam)});
         for (size_t bi = 0; bi < bands.size(); ++bi) {
             PairSet B; B.name = "d" + std::to_string(bi); B.lo = bands[bi].first; B.hi = bands[bi].second;
-            B.cache = truth_cache.empty() ? "" : truth_cache + ".b" + std::to_string(bucket_sources) + "x" + std::to_string(buckets) + "." + B.name;
+            B.cache = truth_cache.empty() ? "" : truth_cache + ".b" + std::to_string(bucket_sources) + "x" + std::to_string(buckets) + rtag + "." + B.name;
             for (int s : bs) {
                 const double sx = T.xy[2 * s], sy = T.xy[2 * s + 1];
                 auto in_band = [&](int t) { double d = std::hypot(T.xy[2 * t] - sx, T.xy[2 * t + 1] - sy); return t != s && d > B.lo && d <= B.hi; };
@@ -193,7 +213,7 @@ int main(int argc, char** argv) {
             for (size_t i = 0; i < m; ++i) by[S.qp[i].first].push_back({si, i});
         }
         if (!by.empty()) {
-            std::unique_ptr<Solver> sol(make_mmp(T.V, T.F, true));
+            std::unique_ptr<Solver> sol(truth_solver());
             for (auto& kv : by) {
                 std::vector<unsigned> tg;
                 for (auto& e : kv.second) tg.push_back(sets[e.first].qp[e.second].second);
@@ -224,7 +244,7 @@ int main(int argc, char** argv) {
         atr.assign(aq.size(), NAN);
         if (!cache.empty() && std::ifstream(cache).good()) { std::ifstream in(cache); for (auto& d : atr) in >> d; }
         else {
-            std::unique_ptr<Solver> sol(make_mmp(T.V, T.F, true));
+            std::unique_ptr<Solver> sol(truth_solver());
             for (size_t i = 0; i < aq.size(); i += a2a_per_source) {
                 const APoint& p = aq[i].first;
                 SurfPt sp{(unsigned)p.f, p.x, p.y, T.z_at(p.f, p.x, p.y)};
@@ -329,6 +349,8 @@ int main(int argc, char** argv) {
     }
     // near-table variants: several on one build keep the dense tables until every variant is encoded
     std::vector<std::string> vlist, nlist;
+    std::vector<int> ilist;
+    { std::stringstream is(interp_variants.empty() ? std::to_string(opt.interp) : interp_variants); std::string x; while (std::getline(is, x, ',')) ilist.push_back(std::stoi(x)); }
     { std::stringstream vs(variants); std::string x; while (std::getline(vs, x, ',')) vlist.push_back(x); }
     if (near_variants.empty()) near_variants = opt.near_store;
     { std::stringstream ns(near_variants); std::string x; while (std::getline(ns, x, ',')) nlist.push_back(x); }
@@ -339,8 +361,10 @@ int main(int argc, char** argv) {
     CertifiedIndex ix(T, opt);
     double tb = since(t0);
     double rss = peak_rss_mb();
+    std::string argv_s;
+    for (int i = 0; i < argc; ++i) { for (const char* c = argv[i]; *c; ++c) { if (*c == '"' || *c == '\\') argv_s += '\\'; argv_s += *c; } if (i + 1 < argc) argv_s += ' '; }
     std::ostringstream js;
-    js << "{\"mesh\":\"" << mesh << "\",\"n\":" << T.n << ",\"eps\":" << opt.eps << ",\"gap_factor\":" << opt.gap_factor
+    js << "{\"argv\":\"" << argv_s << "\",\"mesh\":\"" << mesh << "\",\"n\":" << T.n << ",\"eps\":" << opt.eps << ",\"gap_factor\":" << opt.gap_factor
        << ",\"hierarchy\":\"" << opt.hierarchy << "\",\"k_max\":" << opt.k_max << ",\"solver\":\"" << opt.solver
        << "\",\"threads\":" << opt.threads << ",\"store\":\"" << opt.store << "\",\"near_store\":\"" << near_build
        << "\",\"pois\":" << opt.poi.size() << ",\"peak_rss_mb\":" << rss << table_js
@@ -349,14 +373,24 @@ int main(int argc, char** argv) {
     bool first = true;
     for (auto& kv : ix.timing) { js << (first ? "" : ",") << "\"" << kv.first << "\":" << kv.second; first = false; }
     js << "},\"variants\":[";
+    // the JSON is rewritten after every result (and once right after the build), so a job that dies
+    // or times out keeps what it measured; "complete" says whether it finished
+    auto flush = [&](bool done) {
+        if (json.empty()) return;
+        std::ofstream f(json);
+        f << js.str() << "],\"complete\":" << (done ? "true" : "false") << "}\n";
+    };
+    flush(false);
     bool firstv = true;
     for (const auto& nv : nlist) {
       if (opt.near_store == "dense") { // built with dense tables: encode this variant (keeping them)
           auto mode = CertifiedIndex::near_mode_of(nv);
           if (mode == CertifiedIndex::NEAR_DENSE) ix.use_near(mode); else ix.encode_near(mode, true);
       }
+      for (int iv : ilist) {
+      ix.opt.interp = iv; // the estimate only: 0 none, 1 parabola, 2 model (bounds unchanged)
       for (const auto& var : vlist) {
-        const std::string vname = nlist.size() == 1 ? var : var + "/" + nv;
+        const std::string vname = (nlist.size() == 1 ? var : var + "/" + nv) + (ilist.size() > 1 ? "/i" + std::to_string(iv) : "");
         auto tv = clk::now();
         if (var == opt.store && opt.store != "dense") { /* coded during the build: storage already set */ }
         else if (var == "dense") ix.storage = DENSE;
@@ -369,12 +403,16 @@ int main(int argc, char** argv) {
         auto report = [&](const std::string& set, const std::vector<double>& B, const std::vector<double>& D,
                           const std::vector<double>& qt, int refined, double best, double lo, double hi) {
             const size_t mq = D.size();
+            // weighted: the reference D is a fine Steiner graph (itself an upper bound), so soundness checks
+            // the LB only, and an UB below D is a path the reference missed (counted, not an error)
             bool sound = true;
+            int ub_below = 0;
             double emean = 0, emax = 0, ubmax = 0, ubmean = 0, worst_ratio = 0;
             std::vector<double> errs, widths;
             for (size_t i = 0; i < mq; ++i) {
                 double l = B[3 * i], u = B[3 * i + 1], est = B[3 * i + 2], d = D[i];
-                if (!(l <= d * (1 + 1e-9) && d <= u * (1 + 1e-9))) sound = false;
+                if (!(l <= d * (1 + 1e-9) && (weighted || d <= u * (1 + 1e-9)))) sound = false;
+                ub_below += weighted && u < d * (1 - 1e-9);
                 double e = std::fabs(est / d - 1);
                 errs.push_back(e); emean += e; emax = std::max(emax, e);
                 ubmax = std::max(ubmax, u / d - 1); ubmean += u / d - 1;
@@ -388,21 +426,22 @@ int main(int argc, char** argv) {
             double p99 = errs[(size_t)(0.99 * (mq - 1))];
             char band[64] = "";
             if (lo >= 0) std::snprintf(band, sizeof band, " %.0f-%.0f m", lo, hi);
-            std::printf("%s eps=%.2f g=%.2fe %s kmax=%d threads=%d P=%zu %s%s [%s pairs%s, %zu]: build %.1f s (peak RSS %.0f MB) size %.2f MB (near %.2f MB) | query %.3f us, with refine mean %.2f us p99 %.1f us max %.0f us, refined %d/%zu | sound %s, max UB err %.3f%%, est mean %.4f%% p99 %.3f%% max %.3f%%, width median %.2f%%, max UB/LB %.4f\n",
+            std::printf("%s eps=%.2f g=%.2fe %s kmax=%d threads=%d P=%zu %s%s [%s pairs%s, %zu]: build %.1f s (peak RSS %.0f MB) size %.2f MB (near %.2f MB) | query %.3f us, with refine mean %.2f us p99 %.1f us max %.0f us, refined %d/%zu | sound%s %s, max UB err %.3f%%, est mean %.4f%% p99 %.3f%% max %.3f%%, width median %.2f%%, max UB/LB %.4f\n",
                         mesh.c_str(), opt.eps, opt.gap_factor, opt.hierarchy.c_str(), opt.k_max, opt.threads, opt.poi.size(), vname.c_str(), refine ? "+refine" : "", set.c_str(), band, mq,
                         tb, rss, ix.nbytes() / 1e6, ix.near_bytes() / 1e6, best * 1e6, qmean * 1e6, qs[(size_t)(0.99 * (mq - 1))] * 1e6, qs.back() * 1e6,
-                        refined, mq, sound ? "yes" : "NO", 100 * ubmax, 100 * emean, 100 * p99, 100 * emax, 100 * widths[mq / 2], worst_ratio);
+                        refined, mq, weighted ? " (LB vs reference)" : "", sound ? "yes" : "NO", 100 * ubmax, 100 * emean, 100 * p99, 100 * emax, 100 * widths[mq / 2], worst_ratio);
             std::fflush(stdout);
             js << (firstv ? "" : ",") << "{\"variant\":\"" << vname << "\",\"set\":\"" << set << "\",\"near\":\"" << nv << "\",\"near_bytes\":" << ix.near_bytes();
             if (lo >= 0) js << ",\"band_lo\":" << lo << ",\"band_hi\":" << hi;
             js << ",\"refine\":" << (refine ? "true" : "false")
                << ",\"index_bytes\":" << ix.nbytes() << ",\"prep_s\":" << tprep << ",\"query_us\":" << best * 1e6
                << ",\"query_us_refine_mean\":" << qmean * 1e6 << ",\"query_us_refine_p99\":" << qs[(size_t)(0.99 * (mq - 1))] * 1e6
-               << ",\"refined\":" << refined << ",\"pairs\":" << mq << ",\"sound\":" << (sound ? "true" : "false")
+               << ",\"refined\":" << refined << ",\"pairs\":" << mq << ",\"sound\":" << (sound ? "true" : "false") << ",\"ub_below_reference\":" << ub_below
                << ",\"max_ub_err\":" << ubmax << ",\"ub_mean\":" << ubmean << ",\"est_mean\":" << emean << ",\"est_p99\":" << p99
                << ",\"est_max\":" << emax << ",\"width_median\":" << widths[mq / 2] << ",\"max_ub_over_lb\":" << worst_ratio
                << ",\"cover_entries\":" << ix.cover_entries << "}";
             firstv = false;
+            flush(false);
         };
         for (const auto& S : sets) {
             const auto& Q = S.qp;
@@ -439,8 +478,8 @@ int main(int argc, char** argv) {
             report("a2a", B, atr, qt, refined, qs[ma / 2], -1, -1); // "query" = the median, refines included
         }
       }
+      }
     }
-    js << "]}\n";
-    if (!json.empty()) { std::ofstream f(json); f << js.str(); }
+    flush(true);
     return 0;
 }

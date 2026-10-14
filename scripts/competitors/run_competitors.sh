@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 # usage: [KIND=V2V|A2A] run_competitors.sh <MeshName> <query file> <methods...>   (method[@eps[@sp]])
 set -e
 EAR=${EAR_DIR:?set EAR_DIR to the clone of ItakEjgo/weighted_distance_oracle (built in $EAR_DIR/bld, repaired meshes in $EAR_DIR/datasets/repaired)}

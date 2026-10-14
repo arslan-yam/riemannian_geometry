@@ -1,7 +1,10 @@
 // exactness and speed of the exact solvers: MMP full sweep, MMP stopped at the targets, VTP full sweep
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <string>
 #include <memory>
 #include <random>
 #include "../src/mesh_io.h"
@@ -10,10 +13,12 @@ using namespace cci;
 using clk = std::chrono::steady_clock;
 
 int main(int argc, char** argv) {
-    if (argc < 2) { std::fprintf(stderr, "usage: solver_check mesh.off [sources=5]\n"); return 1; }
+    if (argc < 2) { std::fprintf(stderr, "usage: solver_check mesh.off [sources=5] [--json out.json]\n"); return 1; }
+    std::string json;
+    for (int i = 2; i + 1 < argc; ++i) if (std::string(argv[i]) == "--json") json = argv[i + 1];
     std::vector<double> V; std::vector<unsigned> F;
     read_off(argv[1], V, F);
-    int ns = argc > 2 ? std::atoi(argv[2]) : 5;
+    int ns = argc > 2 && std::string(argv[2]) != "--json" ? std::atoi(argv[2]) : 5;
     unsigned n = V.size() / 3;
     std::vector<unsigned> all(n); for (unsigned i = 0; i < n; ++i) all[i] = i;
     std::mt19937 rng(1);
@@ -53,4 +58,11 @@ int main(int argc, char** argv) {
                 "(VTP speedup %.2fx) | nearest 2%%: MMP-early %.2f ms, VTP %.1f ms | max |MMP-VTP| %.2e (rel %.2e), max |MMP-early| %.2e\n",
                 argv[1], n, F.size() / 3, 1e3 * tinit, 1e3 * ta / ns, 1e3 * tb / ns, 1e3 * tc / ns, ta / tc,
                 1e3 * tnear_e / ns, 1e3 * tnear_v / ns, maxdiff_vtp, maxrel, maxdiff_early);
+    if (!json.empty()) {
+        std::ofstream o(json);
+        o << "{\"tool\":\"solver_check\",\"mesh\":\"" << argv[1] << "\",\"n\":" << n << ",\"faces\":" << F.size() / 3 << ",\"sources\":" << ns
+          << ",\"setup_ms\":" << 1e3 * tinit << ",\"mmp_full_ms\":" << 1e3 * ta / ns << ",\"mmp_early_all_ms\":" << 1e3 * tb / ns
+          << ",\"vtp_full_ms\":" << 1e3 * tc / ns << ",\"mmp_early_near2pct_ms\":" << 1e3 * tnear_e / ns << ",\"vtp_near2pct_ms\":" << 1e3 * tnear_v / ns
+          << ",\"max_rel_mmp_vtp\":" << maxrel << ",\"max_abs_mmp_early\":" << maxdiff_early << "}\n";
+    }
 }

@@ -83,14 +83,29 @@ because lower and upper bounds on terrain distance already exist.
   - query $O(\varepsilon^{-1}\log\frac1\varepsilon + \log\log n)$
   - the constants depend on the weight ratio and on the smallest face angle
 
-  Checked against the Springer page (ESA 2011, LNCS 6942, doi 10.1007/978-3-642-23719-5_49; the full
-  text is paywalled). The bounds above are confirmed. Their reference list points to the technique:
-  - Steiner points (Aleksandrov–Maheshwari–Sack, JACM 2005);
-  - planar distance oracles with path separators and portals (Thorup, JACM 2004; Klein, SODA 2002;
-    Kawarabayashi–Klein–Sommer, ICALP 2011; Abraham–Gavoille, PODC 2006);
-  - r-divisions (Fakcharoenphol–Rao).
+  Read in full (the paper's PDF, 12 pages).
+  - **Theorem 2:** space $O(n\varepsilon^{-3/2}\log^2\frac n\varepsilon\log^2\frac1\varepsilon)$, preprocessing
+    $O(n\varepsilon^{-2}\log^3\frac n\varepsilon\log^2\frac1\varepsilon)$, query $O(\varepsilon^{-1}\log\frac1\varepsilon + \log\log n)$. The
+    abstract has $\log\frac1\varepsilon$ in the space bound, the theorem $\log^2\frac1\varepsilon$.
+  - **Technique:**
+    1. the Aleksandrov–Maheshwari–Sack discretization: Steiner points in geometric progression on the
+       angle bisectors, a graph $G_\varepsilon$ with $\Theta(n\varepsilon^{-1/2}\log\frac1\varepsilon)$ nodes whose
+       distances are $(1+\varepsilon/2)$-approximate;
+    2. shortest-path separators of (an implicit planar version of) $G_\varepsilon$, with Thorup's
+       $\varepsilon$-covers on them (the scaled version);
+    3. distances inside $G_\varepsilon$ are themselves only approximated.
+  - The constants depend on the weight ratio and on $1/\sin$ of the smallest angle.
+  - No implementation or experiments.
 
-  The page lists no experiments, and we know of no implementation.
+  **Differences from our index:**
+  - Their separators are shortest paths of the discretized graph; ours are straight cut lines on the
+    continuous surface, with the window lemma in place of the "a shortest path crosses a shortest-path
+    separator once" argument.
+  - Their labels are covers of approximate graph distances; ours are full rows of exact geodesics (or
+    Steiner-graph distances on weighted terrains), coded in 8/16 bits.
+  - They return an estimate only; we return a certified interval.
+  - Our measurements show covers losing to coded full rows at 10k and 100k vertices (§5 of
+    `notes/research.md`), which is the practical side of their space bound.
 
 **Where they beat us, and what we offer.** Asymptotically, Djidjev–Sommer's near-linear space beats our
 guaranteed index ($\sim n^{1.5}$ labels). Near-linear space by itself is therefore not a claim we can make

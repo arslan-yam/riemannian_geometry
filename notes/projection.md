@@ -110,7 +110,10 @@ proximity, threads, poi, competitors and small.
   - the exact solvers' full sweeps;
   - the UP-Oracle family in its POI setting. Jobs run side by side with `xargs -P $JOBS`, each single-threaded except the
 `threads` phase. Labels are bit-identical for any thread count. On the M1, 2 threads gave 2.0× on
-HorseMount; the top cuts spread their portals over the threads and the rest go one cut per thread. The
+HorseMount; the top cuts spread their portals over the threads and the rest go one cut per thread.
+Memory per thread is one solver: measured 1.4 KB (MMP) and 0.65 KB (VTP) per face after a full sweep,
+so about 3.5 / 1.6 GB per thread on a whole 2.5M-face sub-mesh. The hybrid uses VTP on the top cuts, so
+64 threads need about 100 GB; `--solver-mem-gb` caps it (the threads phase uses 150 GB). The
 data are the UP-Oracle terrains already in `external/UpdatedStructureTerrainCode/input`: AU, GI, LH, SC,
 TJ and VS, each before and after an update, at 0.5M–2.5M faces, plus their POI files.
 

@@ -23,5 +23,9 @@ Solver* make_mmp(const std::vector<double>& V, const std::vector<unsigned>& F, b
 // VTP sweeps the whole (sub-)mesh: its vertex queue does not make a popped vertex final, so there
 // is no exact early stop. Returns nullptr if VTP's own mesh checks reject the mesh
 Solver* make_vtp(const std::vector<double>& V, const std::vector<unsigned>& F);
+// weighted terrains: Dijkstra on the Steiner graph with m points per edge (face weights W, one per face);
+// upper bounds of the weighted geodesic distance (no exact solver exists for weighted regions)
+Solver* make_steiner(const std::vector<double>& V, const std::vector<unsigned>& F, const std::vector<double>& W, int m);
+double steiner_bytes_per_face(int m);
 
 }  // namespace cci

@@ -1,25 +1,33 @@
 diff --git a/base.h b/base.h
-index 44d2d32..9020df0 100644
+index 44d2d32..cc33814 100644
 --- a/base.h
 +++ b/base.h
-@@ -4,6 +4,7 @@
+@@ -4,6 +4,9 @@
  //#define PrintDetails
  
  #include <bits/stdc++.h>
++#ifdef __APPLE__
 +#include <mach/mach.h>
++#endif
  #include "chrono"
  #include "assert.h"
  #include <random>
-@@ -60,7 +61,7 @@ namespace Base {
+@@ -60,7 +63,14 @@ namespace Base {
      using AABB_face_graph_traits = CGAL::AABB_traits<Kernel, AABB_face_graph_primitive>;
      using AABB_tree = CGAL::AABB_tree<AABB_face_graph_traits>;
  
--    typedef boost::optional<AABB_tree::Intersection_and_primitive_id<Ray>::Type> Ray_intersection;
++    // CGAL 6 returns std::optional / std::variant, CGAL 5 boost::optional / boost::variant
++#if CGAL_VERSION_NR >= 1060000000
 +    typedef std::optional<AABB_tree::Intersection_and_primitive_id<Ray>::Type> Ray_intersection;
++#define HARNESS_GET_IF std::get_if
++#else
+     typedef boost::optional<AABB_tree::Intersection_and_primitive_id<Ray>::Type> Ray_intersection;
++#define HARNESS_GET_IF boost::get
++#endif
  
  
      const float eps = 1e-5;
-@@ -70,30 +71,17 @@ namespace Base {
+@@ -70,31 +80,38 @@ namespace Base {
      vector<pair<Point, Point> > A2A_query;
      vector<pair<unsigned, unsigned> > A2A_fid;
  
@@ -27,57 +35,63 @@ index 44d2d32..9020df0 100644
 +    // its face costs w_f x length (the queries charged it at weight 1, below any weighted path)
 +    inline vector<float> &query_face_weight() { static vector<float> w; return w; }
 +    inline float qw(unsigned fid) { auto &w = query_face_weight(); return fid < w.size() ? w[fid] : 1.0f; }
++
  
--    // memory used in KB.
+     // memory used in KB.
 -    size_t physical_memory_used_by_process() {
--        FILE *file = fopen("/proc/self/status", "r");
--        int result = -1;
--        char line[128];
--
--        while (fgets(line, 128, file) != nullptr) {
--            if (strncmp(line, "VmRSS:", 6) == 0) {
--                int len = strlen(line);
--
--                const char *p = line;
--                for (; std::isdigit(*p) == false; ++p) {}
- 
--                line[len - 3] = 0;
--                result = atoi(p);
--
--                break;
--            }
--        }
--
--        fclose(file);
--
--        return result;
-+    // memory used in KB.
++#ifdef __APPLE__
 +    size_t physical_memory_used_by_process() { // macOS: resident size from mach task_info
 +        mach_task_basic_info_data_t info; mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
 +        if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count) != KERN_SUCCESS) return 0;
 +        return info.resident_size / 1024;
++    }
++#else
++    size_t physical_memory_used_by_process() { // Linux: VmRSS from /proc/self/status (the original code)
+         FILE *file = fopen("/proc/self/status", "r");
+         int result = -1;
+         char line[128];
+-
+         while (fgets(line, 128, file) != nullptr) {
+             if (strncmp(line, "VmRSS:", 6) == 0) {
+                 int len = strlen(line);
+-
+                 const char *p = line;
+                 for (; std::isdigit(*p) == false; ++p) {}
+-
+                 line[len - 3] = 0;
+                 result = atoi(p);
+-
+                 break;
+             }
+         }
+-
+         fclose(file);
+-
+         return result;
      }
++#endif
  
      int floatCmp(const float &x) {
-@@ -365,8 +353,8 @@ namespace Base {
+         if (fabs(x) < eps) return 0;
+@@ -365,8 +382,8 @@ namespace Base {
              Ray ray(bot, top);
              Ray_intersection intersection = aabb_tree.first_intersection(ray);
              if (intersection){
 -                if (boost::get<Point>(&(intersection->first))){
 -                    const Point* p = boost::get<Point>(&(intersection->first));
-+                if (std::get_if<Point>(&(intersection->first))){
-+                    const Point* p = std::get_if<Point>(&(intersection->first));
++                if (HARNESS_GET_IF<Point>(&(intersection->first))){
++                    const Point* p = HARNESS_GET_IF<Point>(&(intersection->first));
                      pp = *p;
                      break;
                  }
-@@ -375,8 +363,8 @@ namespace Base {
+@@ -375,8 +392,8 @@ namespace Base {
                  Ray ray2(bot, top2);
                  intersection = aabb_tree.first_intersection(ray2);
                  if (intersection){
 -                    if (boost::get<Point>(&(intersection->first))){
 -                        const Point* p = boost::get<Point>(&(intersection->first));
-+                    if (std::get_if<Point>(&(intersection->first))){
-+                        const Point* p = std::get_if<Point>(&(intersection->first));
++                    if (HARNESS_GET_IF<Point>(&(intersection->first))){
++                        const Point* p = HARNESS_GET_IF<Point>(&(intersection->first));
                          pp = *p;
                          break;
                      }

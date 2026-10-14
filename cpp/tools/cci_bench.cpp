@@ -38,6 +38,7 @@ int main(int argc, char** argv) {
         else if (a == "--verbose") opt.verbose = true;
         else if (a == "--interp") opt.interp = std::stoi(nx());
         else if (a == "--threads") opt.threads = std::stoi(nx());
+        else if (a == "--solver-mem-gb") opt.solver_mem_mb = 1e3 * std::stod(nx());
         else if (a == "--store") opt.store = nx();
         else if (a == "--near-store") opt.near_store = nx();
     }

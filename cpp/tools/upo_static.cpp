@@ -41,9 +41,24 @@ int main(int argc, char** argv) {
     for (int i = 0; i < nq; ++i) exact_distance(&mesh, poi, qp[i].first, qp[i].second, truth[i]);
     std::cout << "mesh " << mesh_file << " vertices " << n << " faces " << mesh.faces().size() << " POIs " << poi_num << " eps " << epsilon << " queries " << nq << std::endl;
 
+    // JSON (--json out.json after the positional arguments), rewritten after every method
+    std::string json;
+    for (int i = 1; i + 1 < argc; ++i) if (std::string(argv[i]) == "--json") json = argv[i + 1];
+    std::vector<std::string> rows;
     auto report = [&](const std::string& name, double build_ms, double size_bytes, const std::vector<double>& ans, const std::vector<double>& qms) {
-        double em = 0, ex = 0, emin = 1e30, qm = 0;
-        for (int i = 0; i < nq; ++i) { double e = ans[i] / truth[i] - 1; em += e; ex = std::max(ex, e); emin = std::min(emin, e); qm += qms[i]; }
+        double em = 0, ex = 0, emin = 1e30, qm = 0, ea = 0;
+        for (int i = 0; i < nq; ++i) { double e = ans[i] / truth[i] - 1; em += e; ea += std::fabs(e); ex = std::max(ex, e); emin = std::min(emin, e); qm += qms[i]; }
+        if (!json.empty()) {
+            std::ostringstream r;
+            r << "{\"method\":\"" << name << "\",\"build_ms\":" << build_ms << ",\"index_bytes\":" << size_bytes << ",\"query_ms\":" << qm / nq
+              << ",\"err_mean_signed\":" << em / nq << ",\"err_mean\":" << ea / nq << ",\"err_max\":" << ex << ",\"err_min\":" << emin << "}";
+            rows.push_back(r.str());
+            std::ofstream o(json);
+            o << "{\"tool\":\"upo_static\",\"mesh\":\"" << mesh_file << "\",\"vertices\":" << n << ",\"pois\":" << poi_num << ",\"eps\":" << epsilon
+              << ",\"queries\":" << nq << ",\"methods\":[";
+            for (size_t k = 0; k < rows.size(); ++k) o << (k ? "," : "") << rows[k];
+            o << "]}\n";
+        }
         std::printf("RESULT %-10s build %10.1f ms  size %9.3f MB  query %10.4f ms  err mean %.4f%% max %.4f%% min %.4f%%\n",
                     name.c_str(), build_ms, size_bytes / 1e6, qm / nq, 100 * em / nq, 100 * ex, 100 * emin);
         std::fflush(stdout);

@@ -11,6 +11,7 @@
 #include <vector>
 #include "graph.h"
 #include "solver.h"
+#include "steiner.h"
 #include "terrain.h"
 
 namespace cci {
@@ -75,7 +76,8 @@ struct ShiftCopy {
 struct Options {
     double eps = 0.1, gap_factor = 0.5, gap = 0, hub_slack = 4.0;
     int interp = 2;                 // 0 none, 1 parabola, 2 model
-    std::string solver = "hybrid";  // mmp | vtp | hybrid
+    std::string solver = "hybrid";  // mmp | vtp | hybrid (exact, unweighted) | steiner (weighted terrains)
+    int steiner_m = 5;              // steiner: points per mesh edge of the label graph
     double hybrid_ratio = 2.0;      // hybrid: VTP when sub-mesh faces <= ratio x faces of the members' box
     bool verbose = false;
     int k_max = 0;                  // version A: at most k_max portals per cut inside the box (0 = no cap)
@@ -83,6 +85,9 @@ struct Options {
     int copies = 3;                 // shifted: number of shifted copies (3 for the 2-d shifting lemma)
     int threads = 1;                // label sweeps, near tables and cut geometry on this many threads
                                     // (results identical to one thread; benchmarks use one)
+    double solver_mem_mb = 0;       // budget for the label solvers alive at once (0 = none): a thread waits
+                                    // before building a solver that would exceed it (estimate per face:
+                                    // MMP 1.6 KB, VTP 0.7 KB, measured 1.4 / 0.65 KB after a full sweep)
     std::string store = "dense";    // dense | code16 | code8: code each cut's labels as soon as it is built
                                     // and drop its float32 labels (peak memory ~ the coded index)
     std::vector<int> poi;           // POI mode: index only these vertices (queries between them); empty = all
@@ -102,7 +107,8 @@ class CertifiedIndex {
     const Terrain& T;
     Options opt;
     double g = 0, Rn = 0, Rq = 0, lam = 1, eps = 0.1;
-    bool exact = true; // labels are exact geodesic distances (MMP / VTP)
+    bool exact = true; // labels are exact geodesic distances (MMP / VTP); false with Steiner labels (the
+                       // certificate's LB falls back to the chord, and nothing is refined exactly)
     FaceGrid grid;
     PointGrid pgrid;
     Graph G;
@@ -125,6 +131,7 @@ class CertifiedIndex {
     std::vector<uint8_t> nz_bytes;
     std::vector<float> nz_q;         // NP relative quanta (sym16, sym8)
     std::map<std::string, double> timing;
+    std::unique_ptr<SteinerGraph> sg; // weighted terrains (solver steiner): one graph for every label search
     int64_t sweeps_mmp = 0, sweeps_vtp = 0;
 
     std::vector<int32_t> slot_of;    // vertex -> row in anc / row / depth_of / near tables (-1: not indexed)
@@ -137,6 +144,7 @@ class CertifiedIndex {
 
     CertifiedIndex(const Terrain& t, const Options& o);
     void bounds(int s, int t, double* out) const; // LB, UB, estimate, with the current storage
+    int answering_cut(int s, int t) const;          // diagnostics: the cut that answers (s, t), -1 if near
     // certify-or-refine: if UB > (1 + eps) LB the pair is computed exactly (local MMP sweep on the
     // ellipse sub-mesh); returns true when it refined
     bool bounds_refined(int s, int t, double* out) const;
@@ -174,7 +182,7 @@ class CertifiedIndex {
     void labels_phase();
     // one cut's label sub-mesh (portals inserted), its members' local ids and the solver choice
     struct CutWork {
-        std::vector<double> V2, Xu;
+        std::vector<double> V2, Xu, W2;  // W2: face weights of the sub-mesh
         std::vector<unsigned> F2, tgt;
         std::vector<int> used, pidx;
         size_t nfaces = 0;
@@ -189,7 +197,8 @@ class CertifiedIndex {
     void feet_phase();
     void submesh(const std::vector<int>& faces, const std::vector<double>& X, const double* along,
                  std::vector<double>& V2, std::vector<unsigned>& F2, std::vector<int>& remap_used,
-                 std::vector<int>& pidx, std::vector<double>& Xu) const;
+                 std::vector<int>& pidx, std::vector<double>& Xu, std::vector<double>* W2 = nullptr) const;
+    Solver* local_solver(const std::vector<double>& V2, const std::vector<unsigned>& F2, const std::vector<double>& W2) const;
     double interp(const Cut& C, const double* f, int K, int i, int rs, int rt) const;
     bool near_lookup(int s, int t, double* out) const; // near pair from the tables of the current mode
     double near_chord(int u, int v) const;
