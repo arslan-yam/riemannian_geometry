@@ -88,7 +88,8 @@ SLURM=1 SLURM_ACCOUNT=<project> THREAD_COUNTS="8 16 32 48" SOLVER_MEM_GB=150 scr
 
 This returns at once. Every job of `ours` … `small` waits for all prepare and truth jobs (`afterany`).
 `weighted` also waits for its Steiner reference, and the EAR scoring waits for the EAR runs.
-`THREAD_COUNTS` stops at 48, the core count of a type D node; those jobs take a whole node (`--exclusive`).
+`THREAD_COUNTS` stops at 48, the core count of a type D node (`--exclusive` is not allowed here; the 48-thread job
+fills a node by its core count).
 
 How long it takes depends on the queue. The longest jobs are the 2.5M-face builds (2–3 days) and EAR-Oracle
 (up to its 72 h timeout).

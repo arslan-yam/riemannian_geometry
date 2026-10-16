@@ -90,10 +90,9 @@ submit() { # Slurm: one job per input line (a `run name ...` line), waiting for 
     # clusters that do not schedule memory (HSE: nodes report 1 MB, CR_CORE): MEM_PER_CORE_GB reserves the
     # memory a job needs by asking for ceil(memory / MEM_PER_CORE_GB) cores (left idle: off by default)
     if [ -n "${MEM_PER_CORE_GB:-}" ]; then local need=$(( (${m%G} + MEM_PER_CORE_GB - 1) / MEM_PER_CORE_GB )); [ $need -gt $c ] && c=$need; fi
-    local ex=""; case $name in threads.*) ex=--exclusive;; esac  # whole node: clean thread scaling
     { echo "#!/bin/bash"  # resubmit a job with: sbatch $L/slurm/<job>.sbatch
       for o in "-J $name" "-o $L/slurm/$name.%j.out" "-c $c" ${SLURM_MEM:+"--mem=$m"} "-t $t" ${SLURM_ACCOUNT:+"-A $SLURM_ACCOUNT"} \
-               ${SLURM_PARTITION:+"-p $SLURM_PARTITION"} ${CONS:+"-C $CONS"} $ex; do echo "#SBATCH $o"; done
+               ${SLURM_PARTITION:+"-p $SLURM_PARTITION"} ${CONS:+"-C $CONS"}; do echo "#SBATCH $o"; done
       echo "cd $PWD"; echo "source ${SLURM_ENV:-scripts/server/hpc_env.sh}"
       echo "SLURM= scripts/server/run_server.sh __job <<'JOB'"; echo "$line"; echo "JOB"; } > $L/slurm/$name.sbatch
     id=$(sbatch --parsable ${dep:+--dependency=afterany:$dep} $L/slurm/$name.sbatch) || {
