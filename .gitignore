@@ -230,10 +230,15 @@ __marimo__/
 
 # project
 .DS_Store
-data/terrains/large/
 results/logs/
 notebooks/_tmp*.ipynb
-external/
+# external: our DGG port and its shim headers are tracked; the clones (UP-Oracle code and data,
+# EAR-Oracle) are made by scripts/server/hpc_setup.sh, the rest stays local
+external/*
+!external/dgg_port/
+!external/dgg_shim/
+external/dgg_shim/*
+!external/dgg_shim/*.h
 cpp/bin/
 results/dgg/*.binary
 results/dgg/*.off

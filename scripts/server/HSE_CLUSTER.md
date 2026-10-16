@@ -32,20 +32,27 @@ by dependencies, so one command submits the whole plan. These are the cluster's 
 - Check the longest wall time each partition allows with `sinfo -o "%P %l"`. The plan asks for up to 6
   days per job (`res()` in `run_server.sh`). If the limit is lower, shorten those `t=` values.
 
-## 1. Copy the code and the data (on the Mac, ~1.5 GB)
+## 1. Code and data
+
+On the cluster (login node):
 
 ```bash
-cd ~/hse/riemannian_geometry && rsync -av --progress --exclude .git --exclude /cpp/bin/ --exclude /cpp/bin_dev/ --exclude /results/ --exclude /external/weighted_distance_oracle/ --exclude /external/NeuroGF/ --exclude /external/DGG_and_SVG/ --exclude '/external/UpdatedStructureTerrainCode/input/*post*' --exclude /external/UpdatedStructureTerrainCode/output/ ./ hse-hpc:rg/
+cd ~ && git clone https://github.com/arslan-yam/riemannian_geometry.git rg
 ```
 
-For a workspace, use `hse-hpc:/scratch/ws/<login>-rg/` as the destination. If the cluster has no `rsync`,
-make a tar on the Mac with the same exclusions and `scp -P 2222` it over. Run the same command again to
-push code changes later.
+Everything else comes from GitHub too, cloned by `hpc_setup.sh` in step 2:
+- the UP-Oracle authors' code and their terrains (`yanyinzhao/UpdatedStructureTerrainCode` at 0ec6aec), which
+  are the inputs of every experiment;
+- EAR-Oracle (`ItakEjgo/weighted_distance_oracle` at 2343aa9).
+
+Our DGG port, its shim headers and the two 100k-vertex DEMs are in this repository.
+For later code changes: commit and push on the Mac, then `cd ~/rg && git pull` on the cluster.
 
 ## 2. Once: setup on the login node (~20–30 min)
 
 This makes the conda environment `rg` (Python, numpy/scipy/matplotlib, CMake, CGAL, GMP, MPFR, GNU time),
-then clones, patches and builds EAR-Oracle, then builds our tools, DGG and UP-Oracle with the system GCC.
+clones UP-Oracle's code and terrains, clones, patches and builds EAR-Oracle, then builds our tools, DGG and
+the UP-Oracle driver with the system GCC.
 
 ```bash
 ssh hse-hpc

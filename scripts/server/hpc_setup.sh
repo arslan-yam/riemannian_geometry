@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One-time setup on the login node of the HSE cluster (it has internet; the compute nodes do not):
-# the conda environment `rg`, EAR-Oracle (clone at 2343aa9, our patch, build) and our tools.
+# the conda environment `rg`, UP-Oracle's code and terrains (clone at 0ec6aec), EAR-Oracle (clone at 2343aa9,
+# our patch, build) and our tools.
 # usage: scripts/server/hpc_setup.sh      (from the repository root, after copying it to the cluster)
 set -eu
 cd "$(dirname "$0")/../.."
@@ -11,6 +12,12 @@ if ! conda env list | grep -q '^rg '; then
 fi
 set +u; source scripts/server/hpc_env.sh; set -u  # conda's activation scripts use unset variables
 echo "python: $(which python3), GNU time: $GTIME, g++: $(g++ --version | head -1)"
+
+# UP-Oracle: the authors' code and their terrains (the inputs of every experiment; 2.8 GB)
+U=external/UpdatedStructureTerrainCode
+[ -d $U/.git ] || git clone https://github.com/yanyinzhao/UpdatedStructureTerrainCode $U
+(cd $U && git checkout -q 0ec6aec)
+ls $U/input/TJpre_2504322.off
 
 # EAR-Oracle: the authors' code plus our patch (weighted-endpoint fix, query harness)
 E=external/weighted_distance_oracle
