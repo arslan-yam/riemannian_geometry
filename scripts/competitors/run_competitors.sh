@@ -17,5 +17,5 @@ for M in "$@"; do
   case $M in *@*@*) MM=${M%%@*}; R=${M#*@}; EPS=${R%@*}; SP=${R#*@};; *@*) MM=${M%@*}; EPS=${M#*@};; esac
   OUT=$EAR/results/${MESH}_${KIND}_${MM}_eps${EPS}_sp${SP}.log
   echo "=== $MESH $KIND $MM eps=$EPS sp-num=$SP -> $OUT"
-  /usr/bin/time -p $EAR/bld/main --generate=0 --input=$EAR/datasets/repaired/$MESH.off --output=$OUT --grid-num=16 --query-num=$NQ --method=$MM --eps=$EPS --sp-num=$SP 2>&1 | grep -E "real|user|Index|memory" || true
+  ${GTIME:-/usr/bin/time} -p $EAR/bld/main --generate=0 --input=$EAR/datasets/repaired/$MESH.off --output=$OUT --grid-num=16 --query-num=$NQ --method=$MM --eps=$EPS --sp-num=$SP 2>&1 | grep -E "real|user|Index|memory" || true
 done

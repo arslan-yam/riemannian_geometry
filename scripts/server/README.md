@@ -1,5 +1,7 @@
 # Server run: step-by-step guide
 
+On the HSE cluster (Slurm), follow [HSE_CLUSTER.md](HSE_CLUSTER.md) instead: the same plan, one Slurm job per run.
+
 Everything runs from `scripts/server/run_server.sh`, one phase after another. Inside a phase, independent
 single-threaded jobs run side by side. The phases and their expected costs are in `notes/projection.md` §4.
 Only the `threads`, `proximity` and `weighted` (m = 10) phases use threads.

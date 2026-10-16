@@ -10,7 +10,7 @@ cp $O/meshes/$M.off $W/
 head -200 $O/comp/$M.V2V.pairs > $W/pairs
 head -200 $O/comp/$M.V2V.truth > $W/truth
 cd $W
-/usr/bin/time -v $ROOT/cpp/bin/dgg_precompute f $M.off $E 1 > precompute.log 2> precompute.time
+${GTIME:-/usr/bin/time} -v $ROOT/cpp/bin/dgg_precompute f $M.off $E 1 > precompute.log 2> precompute.time
 G=$(ls ${M}_FD*_c5.binary | head -1)
 $ROOT/cpp/bin/dgg_bench $G pairs truth --json bench.json > bench.log
 cat bench.log
