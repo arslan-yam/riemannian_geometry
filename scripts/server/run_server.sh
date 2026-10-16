@@ -9,7 +9,8 @@
 # On one machine the jobs of a phase run JOBS at a time (JOBS_BIG / JOBS_PROX for the big ones), phase after
 # phase. With SLURM=1 every job is submitted as a Slurm job of its own (cores, memory and time from res()
 # below; scripts in $L/slurm), the jobs of later phases waiting for prepare and truth (afterany), and the
-# script returns at once. Slurm settings: SLURM_ACCOUNT (-A), SLURM_PARTITION (-p), SLURM_CONSTRAINT (-C,
+# script returns at once. Slurm settings: SLURM_ACCOUNT (-A), SLURM_PARTITION (-p), SLURM_MEM=1 (pass --mem,
+# where the cluster schedules memory), MEM_PER_CORE_GB (else: reserve memory as cores), SLURM_CONSTRAINT (-C,
 # default type_d: one CPU type for every timing; empty: any), SLURM_ENV (a file every job sources first, default
 # scripts/server/hpc_env.sh). THREAD_COUNTS: the threads phase (default 8 16 32 64).
 # needs: g++ >= 9, make, GNU xargs, python3 with numpy/scipy (rgeo), the UP-Oracle data in
@@ -86,9 +87,12 @@ submit() { # Slurm: one job per input line (a `run name ...` line), waiting for 
   local line name c m t id ids="" dep=$(echo "$BASE_DEP:${DEP:-}" | sed 's/^:*//; s/:*$//; s/::*/:/g')
   while IFS= read -r line; do
     name=$(echo "$line" | awk '{print $2}'); read c m t <<< "$(res $name)"
+    # clusters that do not schedule memory (HSE: nodes report 1 MB, CR_CORE): MEM_PER_CORE_GB reserves the
+    # memory a job needs by asking for ceil(memory / MEM_PER_CORE_GB) cores (left idle: off by default)
+    if [ -n "${MEM_PER_CORE_GB:-}" ]; then local need=$(( (${m%G} + MEM_PER_CORE_GB - 1) / MEM_PER_CORE_GB )); [ $need -gt $c ] && c=$need; fi
     local ex=""; case $name in threads.*) ex=--exclusive;; esac  # whole node: clean thread scaling
     { echo "#!/bin/bash"  # resubmit a job with: sbatch $L/slurm/<job>.sbatch
-      for o in "-J $name" "-o $L/slurm/$name.%j.out" "-c $c" "--mem=$m" "-t $t" ${SLURM_ACCOUNT:+"-A $SLURM_ACCOUNT"} \
+      for o in "-J $name" "-o $L/slurm/$name.%j.out" "-c $c" ${SLURM_MEM:+"--mem=$m"} "-t $t" ${SLURM_ACCOUNT:+"-A $SLURM_ACCOUNT"} \
                ${SLURM_PARTITION:+"-p $SLURM_PARTITION"} ${CONS:+"-C $CONS"} $ex; do echo "#SBATCH $o"; done
       echo "cd $PWD"; echo "source ${SLURM_ENV:-scripts/server/hpc_env.sh}"
       echo "SLURM= scripts/server/run_server.sh __job <<'JOB'"; echo "$line"; echo "JOB"; } > $L/slurm/$name.sbatch
@@ -236,8 +240,8 @@ competitors) # their code on the same prepared meshes and the same queries (expo
 smoke) # every tool and the whole pipeline once on a 1,058-face terrain: results in $O/smoke
   if [ -n "$SLURM" ]; then # the whole phase as one Slurm job
     { echo "#!/bin/bash"
-      for o in "-J smoke" "-o $L/slurm/smoke.%j.out" "-c 4" "--mem=16G" "-t 1:00:00" ${SLURM_ACCOUNT:+"-A $SLURM_ACCOUNT"} \
-               ${SLURM_PARTITION:+"-p $SLURM_PARTITION"} ${CONS:+"-C $CONS"}; do echo "#SBATCH $o"; done
+      for o in "-J smoke" "-o $L/slurm/smoke.%j.out" "-c 4" ${SLURM_MEM:+"--mem=16G"} "-t 30:00" ${SLURM_ACCOUNT:+"-A $SLURM_ACCOUNT"} \
+               "-p ${SLURM_PARTITION:-test}" ${CONS:+"-C $CONS"}; do echo "#SBATCH $o"; done  # test: short, high priority
       echo "cd $PWD"; echo "source ${SLURM_ENV:-scripts/server/hpc_env.sh}"; echo "SLURM= scripts/server/run_server.sh smoke"; } > $L/slurm/smoke.sbatch
     sbatch $L/slurm/smoke.sbatch
     continue

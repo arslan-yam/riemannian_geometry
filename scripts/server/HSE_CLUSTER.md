@@ -10,6 +10,8 @@ by dependencies, so one command submits the whole plan. These are the cluster's 
 | compute nodes have no internet | `hpc_setup.sh` (conda env, EAR clone, builds) runs on the login node |
 | 24 h default wall time | every job gets its own `-t`, at most 6 days (the shifted hierarchy at 1.5M faces) |
 | a job whose CPUs stay < 10% loaded for ~3 h can be cancelled | one Slurm job per run, so no idle cores waiting for the slowest run of a phase |
+| Slurm does not schedule memory (nodes report 1 MB; `--mem` is rejected) | jobs ask for cores and time only; `MEM_PER_CORE_GB=16` reserves memory as extra cores (one per 16 GB, the type D ratio), off by default since those cores stay idle |
+| the `test` partition: jobs up to 30 min, higher priority | the smoke test runs there |
 | node types differ | `-C type_d` for every job: 2× Xeon Gold 6248R (48 cores), 768 GB. One CPU type for every timing |
 
 ## 0. Once: account, key, project
