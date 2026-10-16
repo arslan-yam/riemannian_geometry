@@ -11,7 +11,7 @@
 #include <fstream>
 #include <assert.h>
 
-#include "DGG_definition.h"
+#include "dgg_definition.h"
 
 
 template<typename T>  class SparseGraph{

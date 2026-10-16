@@ -1,5 +1,5 @@
 #include "stdafx.h"
-#include <windows.h>
+#include <Windows.h>
 #include "Shlwapi.h"
 #include <thread>
 #include <random>

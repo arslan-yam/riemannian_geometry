@@ -1,6 +1,6 @@
 #include <string>
 #include <ctime>
-#include <windows.h>
+#include <Windows.h>
 #include <cstdio>   
 
 #include "dgg_time.h"

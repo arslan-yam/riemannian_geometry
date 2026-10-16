@@ -1,5 +1,5 @@
 #include "stdafx.h"
-#include "DGG_precompute.h"
+#include "dgg_precompute.h"
 
 using namespace std;
 
