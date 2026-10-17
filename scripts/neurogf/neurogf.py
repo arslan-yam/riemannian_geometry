@@ -25,11 +25,17 @@ usage: python3 neurogf.py --mesh m.off --data DIR --queries PREFIX --out DIR [--
 writes OUT/neurogf.json (rewritten as it goes, "complete" at the end), the checkpoints and the predictions
 """
 import argparse, json, os, sys, time
+# thread pools sized to the cores this job may use (a Slurm job sees every core of the node, but runs on its
+# allocation: 48 BLAS / OpenMP / k-d tree threads on one core thrash). Set before numpy and torch load.
+NCPU = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ[_v] = str(NCPU)
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from scipy.spatial import cKDTree
+torch.set_num_threads(NCPU)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from rgeo.terrain import read_off
@@ -200,7 +206,7 @@ a = ap.parse_args()
 os.makedirs(a.out, exist_ok=True)
 dev = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 result = {"tool": "neurogf", "argv": " ".join(sys.argv), "mesh": a.mesh, "device": str(dev),
-          "gpu": torch.cuda.get_device_name(0) if dev.type == "cuda" else None, "torch": torch.__version__,
+          "gpu": torch.cuda.get_device_name(0) if dev.type == "cuda" else None, "torch": torch.__version__, "cpus": NCPU,
           "epochs": a.epochs, "sdf_epochs": a.sdf_epochs, "iters": a.iters, "test_scale": a.test_scale, "complete": False}
 def flush():
     json.dump(result, open(os.path.join(a.out, "neurogf.json"), "w"), indent=1)
@@ -227,7 +233,7 @@ def fetch_train_data_sdf(num_fetch):
     q2 = sp[np.random.choice(len(sp), k, replace=False)]
     q3 = random_jittering(sp[np.random.choice(len(sp), k, replace=False)], 0.03, 0.03)
     q = np.concatenate((q1, q2, q3), axis=0).astype(np.float32)
-    return q, tree.query(q, workers=-1)[0].astype(np.float32)
+    return q, tree.query(q, workers=NCPU)[0].astype(np.float32)
 
 ld = lambda f: np.load(os.path.join(a.data, f + ".npy"))
 def nrows(x):  # (..., 7) rows: coordinates and the distance normalised
@@ -269,9 +275,12 @@ optimizer = optim.AdamW(sdist_querier.parameters(), lr=1e-2, weight_decay=1e-8)
 scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=a.sdf_epochs, eta_min=1e-4)
 criterion = nn.MSELoss()
 best_loss, best_state = 1e8, None
+prep_s = 0.0
 for epc in range(1, a.sdf_epochs + 1):
     sdist_querier.train()
+    tp = time.time()
     q, gt = fetch_train_data_sdf(90000); q, gt = T(q), T(gt)
+    prep_s += time.time() - tp
     for _ in range(a.iters):
         optimizer.zero_grad()
         loss = criterion(sdist_querier(q), gt)
@@ -282,8 +291,8 @@ for epc in range(1, a.sdf_epochs + 1):
 sdist_querier.load_state_dict(best_state); sdist_querier.eval()
 for p in sdist_querier.parameters(): p.requires_grad_(False)
 torch.save(best_state, os.path.join(a.out, "sdf_querier.pth"))
-result["sdf_pretrain_s"] = time.time() - t0; flush()
-print(f"distance-to-surface querier: {result['sdf_pretrain_s']:.0f} s, loss {best_loss:.3g}", flush=True)
+result["sdf_pretrain_s"] = time.time() - t0; result["sdf_prep_s"] = prep_s; flush()
+print(f"distance-to-surface querier: {result['sdf_pretrain_s']:.0f} s ({prep_s:.0f} s preparing data), loss {best_loss:.3g}", flush=True)
 
 # ---------------------------------------------------------------- 2. NeuroGF (training_neurogf.py)
 D, num_pp_g, num_pp_l = 256, PG.shape[2], PL.shape[1]
@@ -303,8 +312,10 @@ def predict(q, X, bs=100000):
 
 t1 = time.time()
 best_mre, best_state, log = 1e8, None, []
+prep_s = 0.0
 for epc in range(1, a.epochs + 1):
     net.train()
+    tp = time.time()
     sdf_q, sdist_gt = fetch_train_data_sdf(30000)
     gq_g, gq_l1, gq_l2, gd_g, gd_l1, gd_l2 = fetch_train_data_gdf(256 // a.test_scale, 256, 32, 64)
     pg_uni, pl_uni = fetch_train_data_spf(128 // a.test_scale, 32, 32)
@@ -317,6 +328,7 @@ for epc in range(1, a.epochs + 1):
     sdf_q, sdist_gt = T(sdf_q), T(sdist_gt)
     gq_g, gq_l1, gq_l2, gd_g, gd_l1, gd_l2 = map(T, (gq_g, gq_l1, gq_l2, gd_g, gd_l1, gd_l2))
     spf_q_g, spf_q_l, spath_gt_g, spath_gt_l, lines_g, lines_l = map(T, (spf_q_g, spf_q_l, spath_gt_g, spath_gt_l, lines_g, lines_l))
+    prep_s += time.time() - tp
     for _ in range(a.iters):
         optimizer.zero_grad()
         sdist_out, (go_g, go_l1, go_l2), (so_g, so_l) = net(sdf_q, gq_g, gq_l1, gq_l2, spf_q_g, spf_q_l, lines_g, lines_l)
@@ -333,11 +345,11 @@ for epc in range(1, a.epochs + 1):
         state = {k: v.detach().cpu().clone() for k, v in net.state_dict().items()}
         pv = predict(querier_from(state), VAL[:, 0:6])
         mre = float((np.abs(pv - VAL[:, 6]) / VAL[:, 6]).mean())
-        log.append({"epoch": epc, "val_mre": mre, "loss_gdist": float(loss_gdist.item()), "s": time.time() - t1})
+        log.append({"epoch": epc, "val_mre": mre, "loss_gdist": float(loss_gdist.item()), "s": time.time() - t1, "prep_s": prep_s})
         if mre < best_mre:
             best_mre, best_state = mre, state
             torch.save(best_state, os.path.join(a.out, "neurogf_best.pth"))
-        print(f"epoch {epc}: val MRE {100 * mre:.3f}% (best {100 * best_mre:.3f}%), {time.time() - t1:.0f} s", flush=True)
+        print(f"epoch {epc}: val MRE {100 * mre:.3f}% (best {100 * best_mre:.3f}%), {time.time() - t1:.0f} s ({prep_s:.0f} s preparing data)", flush=True)
         result.update(train_s=time.time() - t1, val_mre=best_mre, log=log); flush()
 result.update(train_s=time.time() - t1, val_mre=best_mre, log=log)
 
