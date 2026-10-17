@@ -33,12 +33,36 @@ int main(int argc, char** argv) {
         std::shuffle(all.begin(), all.end(), rng); poi.assign(all.begin(), all.begin() + k);
     } else { std::ifstream in(poi_arg); int k; in >> k; poi.resize(k); for (auto& p : poi) in >> p; }
     int poi_num = poi.size();
-    // query pairs among POIs; exact truth by MMP
+    // options after the positional arguments: --json out.json, --pairs f ("s t [distance]" per line, vertex
+    // ids of POIs: answer these pairs, with the given exact distances, instead of random ones), --dump prefix
+    // (each method's answers and query times, prefix.<method>.txt: "answer query_ms" per pair)
+    std::string pairs_file, dump;
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == "--pairs") pairs_file = argv[i + 1];
+        if (std::string(argv[i]) == "--dump") dump = argv[i + 1];
+    }
+    // query pairs among POIs; exact truth by MMP (or given)
     std::mt19937 rng(11);
     std::vector<std::pair<int, int>> qp;
-    while ((int)qp.size() < nq) { int s = rng() % poi_num, t = rng() % poi_num; if (s != t) qp.push_back({s, t}); }
-    std::vector<double> truth(nq);
-    for (int i = 0; i < nq; ++i) exact_distance(&mesh, poi, qp[i].first, qp[i].second, truth[i]);
+    std::vector<double> truth;
+    if (!pairs_file.empty()) {
+        std::unordered_map<int, int> idx;
+        for (int i = 0; i < poi_num; ++i) idx[poi[i]] = i;
+        std::ifstream in(pairs_file); std::string line;
+        while (std::getline(in, line)) {
+            std::istringstream ls(line); int s, t; double d = -1;
+            if (!(ls >> s >> t)) continue;
+            ls >> d;
+            if (!idx.count(s) || !idx.count(t)) { std::cerr << "pair " << s << " " << t << ": not POIs\n"; return 1; }
+            qp.push_back({idx[s], idx[t]}); truth.push_back(d);
+        }
+        nq = (int)qp.size();
+        for (int i = 0; i < nq; ++i) if (truth[i] < 0) exact_distance(&mesh, poi, qp[i].first, qp[i].second, truth[i]);
+    } else {
+        while ((int)qp.size() < nq) { int s = rng() % poi_num, t = rng() % poi_num; if (s != t) qp.push_back({s, t}); }
+        truth.resize(nq);
+        for (int i = 0; i < nq; ++i) exact_distance(&mesh, poi, qp[i].first, qp[i].second, truth[i]);
+    }
     std::cout << "mesh " << mesh_file << " vertices " << n << " faces " << mesh.faces().size() << " POIs " << poi_num << " eps " << epsilon << " queries " << nq << std::endl;
 
     // JSON (--json out.json after the positional arguments), rewritten after every method
@@ -46,6 +70,11 @@ int main(int argc, char** argv) {
     for (int i = 1; i + 1 < argc; ++i) if (std::string(argv[i]) == "--json") json = argv[i + 1];
     std::vector<std::string> rows;
     auto report = [&](const std::string& name, double build_ms, double size_bytes, const std::vector<double>& ans, const std::vector<double>& qms) {
+        if (!dump.empty()) {
+            std::ofstream d(dump + "." + name + ".txt");
+            d << std::setprecision(10);
+            for (int i = 0; i < nq; ++i) d << ans[i] << " " << qms[i] << "\n";
+        }
         double em = 0, ex = 0, emin = 1e30, qm = 0, ea = 0;
         for (int i = 0; i < nq; ++i) { double e = ans[i] / truth[i] - 1; em += e; ea += std::fabs(e); ex = std::max(ex, e); emin = std::min(emin, e); qm += qms[i]; }
         if (!json.empty()) {

@@ -12,6 +12,7 @@
 #     obstacles  holes in TJ / GI at 500k faces (disks covering 5 / 10 / 20%, six walls with gaps): truth, our
 #                index, MMP vs VTP, EAR-Oracle, DGG
 #     neurogf    NeuroGF (GPU) on the six 500k terrains, TJ at 1M and the obstacle meshes
+#     proxpoi    kNN / range queries in UP-Oracle's setting (their POI files), ours against the UP-Oracle family
 #   SMOKE2=1 RG_OUT=results/server/smoke2: obstacles and neurogf on TJpre_1058, a few minutes
 # On one machine the jobs of a phase run JOBS at a time (JOBS_BIG / JOBS_PROX for the big ones), phase after
 # phase. With SLURM=1 every job is submitted as a Slurm job of its own (cores, memory and time from res()
@@ -69,6 +70,10 @@ if [ -n "$SMOKE2" ]; then
   NGF_DATA="--sources 32 --val 2 --global 512 --paths 128"; NGF_ARGS="--epochs 20 --sdf-epochs 5 --iters 20"
 fi
 NGF_PY=${NGF_PY:-$(dirname "${CONDA_PREFIX:-/nonexistent/rg}")/ngf/bin/python}  # the conda env ngf (hpc_setup_neurogf.sh)
+# proxpoi: terrains, size and POI counts (SMOKE2: TJpre_1058 with its 50 POIs)
+PTERR=$TERR; PS=500000; PPOIS="50 500 2500"
+[ -n "$SMOKE2" ] && { PTERR="TJ"; PS=1058; PPOIS="50"; }
+ab() { case $1 in /*) echo "$1";; *) echo "$PWD/$1";; esac; }  # absolute path
 okind() { case $1 in blobs*) echo "--kind blobs --cover 0.${1#blobs}";; walls) echo "--kind walls --walls 6";; esac; }
 truth() { echo "--truth-cache $O/truth/$1.s200x10"; }  # one cache name per terrain (every set derives from it)
 run() { # name, command...: runs one job; its output in $L/name.log, GNU time in $L/name.time, and one JSON
@@ -99,6 +104,8 @@ res() { # Slurm resources of one job, by its name: cores, memory, time limit, GP
     dgg.*)                 m=$((24 * k))G;  t=2-00:00:00 ;;
     upo.*)                 m=64G;           t=3-00:00:00 ;;
     make.*|prep.*)         m=8G;            t=2:00:00 ;;
+    proxpoi.upo.*)         m=64G;           t=3-00:00:00 ;;
+    proxpoi.eval.*)        m=8G;            t=2:00:00 ;;
     ngfdata.*) c=$NGF_THREADS; m=48G;       t=12:00:00 ;;
     ngf.*.epochs800)  g=1; m=48G;           t=4-00:00:00 ;;
     ngf.*)            g=1; m=48G;           t=2-00:00:00 ;;
@@ -138,8 +145,9 @@ __job) # inside a Slurm job: the job lines on stdin, one after another
   xargs -d '\n' -P 1 -I{} bash -c '{}' ;;
 build) # our tools, and the competitors built from source: DGG (our port) and the UP-Oracle static driver
   make -C cpp -B -j8 all dgg bin/upo_static ;;  # -B: cpp/bin holds macOS objects tracked in git
-build2) # the obstacles and neurogf phases' tools, in cpp/bin2 (cpp/bin stays as the main run built it)
-  make -C cpp -B -j8 BIN=bin2 all dgg ;;
+build2) # the tools of the obstacles, neurogf and proxpoi phases, in cpp/bin2 (cpp/bin stays as the main run
+        # built it). With jobs of these phases queued, relink only what changed instead (no -B)
+  make -C cpp -B -j8 BIN=bin2 all dgg bin2/upo_static ;;
 prepare) # one prepared copy of every terrain for every method: folded faces repaired, chart at the origin
   for T in $TERR; do for S in $SIZES; do
     [ -f $IN/${T}pre_$S.off ] || echo "run prepare.${T}_$S python3 scripts/competitors/prepare_mesh.py $SRC/${T}pre_$S.off $IN/${T}pre_$S.off"
@@ -319,6 +327,20 @@ neurogf) # NeuroGF (Zhang et al., NeurIPS 2023), the learned baseline, on the qu
       } | DEP=$d par 1 > /dev/null
     fi
   done ;;
+proxpoi) # kNN and range queries in UP-Oracle's setting: their POI files (50, 500, 2500 POIs) on the six terrains at
+         # 500k faces, 20 query POIs each, k = 1, 10, 25 and radii of 1, 3 and 10% of the chart diagonal. Ours: certified
+         # kNN / range on an index of the POIs (cpp/bin2/proximity; exact and approximate modes, against exact search
+         # on the fly). The UP-Oracle family (UP, WSPD, RC and EAR-Oracle, their code) has no proximity operator: it
+         # answers every (query, POI) pair with one distance query, scored as kNN / range by knn_eval.py
+  mkdir -p $O/proxpoi
+  ids=$(for T in $PTERR; do B=${T}pre_$PS; [ -f $IN/$B.off ] || echo "run obst.prep.$T python3 scripts/competitors/prepare_mesh.py $SRC/$B.off $IN/$B.off"; done | par 2)
+  for T in $PTERR; do for P in $PPOIS; do
+    M=${T}pre_$PS; PF=$(ab $SRC/${T}pre_${P}_poi_on_$PS.txt); X=proxpoi.$T.$P; W=$(ab $O/proxpoi/$X); mkdir -p $W
+    d=$(echo "run proxpoi.ours.$T.$P $X2/proximity $IN/$M.off --poi-file $PF --queries-from-objects --poi-index --queries 20 --k 1,10,25 --radius 0.01,0.03,0.1 --eps 0.2 --gap-factor 1 --store code8 --truth-cache $O/truth/$X --export $O/comp/$X --json $O/proxpoi.ours.$T.$P.json" | DEP=$ids par 1)
+    u=$(echo "run proxpoi.upo.$T.$P bash -c 'cd $W && $(ab $X2/upo_static) $(ab $IN/$M.off) $PF 0.1 0 UP,WSPD,RC,EAR --pairs $(ab $O/comp/$X.pairs) --dump upo --json $(ab $O/proxpoi.upo.$T.$P.json)'" | DEP=$d par 1)
+    A=""; for N in UP-Oracle WSPD-Oracle RC-Oracle EAR-Oracle; do A="$A $N=$W/upo.$N.txt"; done
+    echo "run proxpoi.eval.$T.$P python3 scripts/competitors/knn_eval.py --pairs $O/comp/$X.pairs --mesh $IN/$M.off --answers$A --k 1,10,25 --radius 0.01,0.03,0.1 --json $O/proxpoi.competitors.$T.$P.json" | DEP=$u par 1 > /dev/null
+  done; done ;;
 smoke) # every tool and the whole pipeline once on a 1,058-face terrain: results in $O/smoke
   if [ -n "$SLURM" ]; then # the whole phase as one Slurm job
     { echo "#!/bin/bash"

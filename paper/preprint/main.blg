@@ -1,0 +1,78 @@
+This is BibTeX, Version 0.99e (TeX Live 2026)
+Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
+The top-level auxiliary file: main.aux
+The style file: ACM-Reference-Format.bst
+Reallocated singl_function (elt_size=4) to 100 items from 50.
+Reallocated singl_function (elt_size=4) to 100 items from 50.
+Reallocated wiz_functions (elt_size=4) to 6000 items from 3000.
+Database file #1: refs.bib
+Reallocated singl_function (elt_size=4) to 100 items from 50.
+Reallocated wiz_functions (elt_size=4) to 9000 items from 6000.
+Reallocated glb_str_ptr (elt_size=4) to 20 items from 10.
+Reallocated global_strs (elt_size=200001) to 20 items from 10.
+Reallocated glb_str_end (elt_size=4) to 20 items from 10.
+Reallocated singl_function (elt_size=4) to 100 items from 50.
+Warning--empty publisher in abraham2011hub
+Warning--empty address in abraham2011hub
+Warning--empty publisher in akiba2013fast
+Warning--empty address in akiba2013fast
+Warning--empty publisher in chen1990shortest
+Warning--empty address in chen1990shortest
+Warning--empty publisher in djidjev2011approximate
+Warning--empty address in djidjev2011approximate
+Warning--page numbers missing in both pages and numpages fields in huang2023ear
+Warning--empty publisher in kawarabayashi2011linear
+Warning--empty address in kawarabayashi2011linear
+Warning--empty publisher in klein2002preprocessing
+Warning--empty address in klein2002preprocessing
+Warning--empty publisher in ouyang2018hierarchy
+Warning--empty address in ouyang2018hierarchy
+Warning--empty publisher in wei2017distance
+Warning--empty address in wei2017distance
+Warning--page numbers missing in both pages and numpages fields in yan2024rc
+Warning--page numbers missing in both pages and numpages fields in yan2025up
+Warning--empty publisher in zhang2023neurogf
+Warning--empty address in zhang2023neurogf
+Warning--page numbers missing in both pages and numpages fields in zhang2023neurogf
+You've used 28 entries,
+            6273 wiz_defined-function locations,
+            1676 strings with 23257 characters,
+and the built_in function-call counts, 34367 in all, are:
+= -- 4802
+> -- 962
+< -- 0
++ -- 327
+- -- 327
+* -- 2311
+:= -- 3103
+add.period$ -- 139
+call.type$ -- 28
+change.case$ -- 201
+chr.to.int$ -- 28
+cite$ -- 50
+duplicate$ -- 3053
+empty$ -- 2149
+format.name$ -- 427
+if$ -- 8756
+int.to.chr$ -- 2
+int.to.str$ -- 1
+missing$ -- 121
+newline$ -- 254
+num.names$ -- 196
+pop$ -- 1175
+preamble$ -- 1
+purify$ -- 425
+quote$ -- 0
+skip$ -- 1086
+stack$ -- 0
+substring$ -- 2768
+swap$ -- 329
+text.length$ -- 0
+text.prefix$ -- 0
+top$ -- 0
+type$ -- 574
+warning$ -- 22
+while$ -- 192
+width$ -- 0
+write$ -- 558
+(There were 22 warnings)

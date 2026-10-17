@@ -22,6 +22,12 @@
 // usage: proximity mesh.off [--eps 0.2] [--gap-factor 1] [--kmax K] [--store code8] [--near-store sym]
 //        [--threads 1] [--objects 10000 | --poi-file f] [--queries 100] [--k 1,10,100]
 //        [--radius 0.01,0.03,0.1] (fractions of the chart diagonal) [--seed 7] [--truth-cache f] [--json out.json]
+//        [--queries-from-objects] [--poi-index] [--export prefix]
+// POI workloads (the setting of UP-Oracle): --queries-from-objects draws the query vertices among the objects
+// (a query is then one of the objects, at distance 0: kNN asks internally for k + 1 and reports k);
+// --poi-index indexes the objects only (Options::poi); --export writes prefix.pairs, one line
+// "query object distance" per query and every other object (vertex ids, exact distances), for the
+// competitors to answer the same pairs (scripts/competitors/knn_eval.py scores their kNN and range answers)
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -49,7 +55,8 @@ int main(int argc, char** argv) {
     std::string mesh = argv[1], poi_file, truth_cache, json, klist = "1,10,100", rlist = "0.01,0.03,0.1";
     Options opt; opt.eps = 0.2; opt.gap_factor = 1;
     int M = 10000, Q = 100, seed = 7;
-    bool profile = false;
+    bool profile = false, from_objects = false, poi_index = false;
+    std::string export_prefix;
     for (int i = 2; i < argc; ++i) {
         std::string a = argv[i];
         auto nx = [&]() { return std::string(argv[++i]); };
@@ -69,6 +76,9 @@ int main(int argc, char** argv) {
         else if (a == "--truth-cache") truth_cache = nx();
         else if (a == "--json") json = nx();
         else if (a == "--profile") profile = true; // per-call timing of the kNN candidate pass, by the answering cut's size
+        else if (a == "--queries-from-objects") from_objects = true;
+        else if (a == "--poi-index") poi_index = true;
+        else if (a == "--export") export_prefix = nx();
     }
     std::vector<double> V; std::vector<unsigned> F;
     read_off(mesh, V, F);
@@ -90,7 +100,11 @@ int main(int argc, char** argv) {
     obj.erase(std::unique(obj.begin(), obj.end()), obj.end());
     M = (int)obj.size();
     std::vector<int> qv(Q);
-    for (auto& q : qv) q = (int)(rng() % T.n);
+    if (from_objects) { // Q distinct objects
+        std::vector<int> o2(obj); std::shuffle(o2.begin(), o2.end(), rng);
+        Q = std::min(Q, M); qv.assign(o2.begin(), o2.begin() + Q);
+    } else for (auto& q : qv) q = (int)(rng() % T.n);
+    if (poi_index) opt.poi = obj;
     // truth: exact distances from each query vertex to every object, one full VTP sweep each (the
     // on-the-fly baseline); its time is the baseline's query time
     std::vector<float> D((size_t)Q * M);
@@ -134,6 +148,12 @@ int main(int argc, char** argv) {
         }
     }
     double sweep_mean = 0; for (double x : sweep_s) sweep_mean += x / Q;
+    if (!export_prefix.empty()) { // every (query, other object) pair with its exact distance
+        std::ofstream o(export_prefix + ".pairs");
+        o.precision(9);
+        for (int i = 0; i < Q; ++i)
+            for (int j = 0; j < M; ++j) if (obj[j] != qv[i]) o << qv[i] << " " << obj[j] << " " << D[(size_t)i * M + j] << "\n";
+    }
     // the pruned on-the-fly baseline: one MMP solver (early stop) on the whole mesh, built once
     std::unique_ptr<Solver> mmp(make_mmp(T.V, T.F, true));
     // the index
@@ -168,7 +188,8 @@ int main(int argc, char** argv) {
     // ---------------------------------------------------------------- kNN
     bool firstk = true;
     for (double kd : parse_list(klist)) {
-        const int k = std::min((int)kd, M);
+        const int kr = (int)kd;                                       // reported k
+        const int k = std::min(kr + (from_objects ? 1 : 0), M);        // the query itself is one of the objects
         std::vector<double> tc, ta, ncand, nref, tb2, tg_;
         double prof_grid = 0, prof_bounds = 0; size_t prof_calls = 0;
         double prof_bin_t[5] = {0, 0, 0, 0, 0}, prof_worst = 0; long prof_bin_n[5] = {0, 0, 0, 0, 0};
@@ -314,8 +335,8 @@ int main(int argc, char** argv) {
         std::printf("    slowest call %.1f us: cut %d, K %d, %zu members\n", prof_worst * 1e6, prof_worst_cid, prof_worst_K, prof_worst_nm);
         }
         std::printf("  kNN k=%d: approximate (UB, guaranteed <= 1+eps): %.1f us mean, p50 %.1f us, recall %.4f, worst d/d_k %.4f (%d over 1+eps) | certified exact %.1f us mean (%.1f us refining with a whole-mesh solver), p50 %.1f, p99 %.1f us | %.0f candidates, refined %d/%d queries (%.1f objects each) | exact %d/%d | estimate-only: recall %.4f, worst d/d_k %.4f | on the fly: pruned MMP %.2f ms (%.0fx, %d wrong), full sweep %.2f ms (%.0fx)\n",
-                    k, am * 1e6, pct(ta, 0.5) * 1e6, ap_recall, ap_ratio, ap_bad, tm * 1e6, gm * 1e6, pct(tc, 0.5) * 1e6, pct(tc, 0.99) * 1e6, cm, refined_q, Q, refined_q ? rm * Q / refined_q : 0.0, correct, Q, recall, ratio_max, bm * 1e3, bm / tm, bad2, sweep_mean * 1e3, sweep_mean / tm);
-        js << (firstk ? "" : ",") << "{\"k\":" << k << ",\"approx_us_mean\":" << am * 1e6 << ",\"approx_us_p50\":" << pct(ta, 0.5) * 1e6
+                    kr, am * 1e6, pct(ta, 0.5) * 1e6, ap_recall, ap_ratio, ap_bad, tm * 1e6, gm * 1e6, pct(tc, 0.5) * 1e6, pct(tc, 0.99) * 1e6, cm, refined_q, Q, refined_q ? rm * Q / refined_q : 0.0, correct, Q, recall, ratio_max, bm * 1e3, bm / tm, bad2, sweep_mean * 1e3, sweep_mean / tm);
+        js << (firstk ? "" : ",") << "{\"k\":" << kr << ",\"k_internal\":" << k << ",\"approx_us_mean\":" << am * 1e6 << ",\"approx_us_p50\":" << pct(ta, 0.5) * 1e6
            << ",\"approx_recall\":" << ap_recall << ",\"approx_worst_ratio\":" << ap_ratio << ",\"approx_over_bound\":" << ap_bad << ",\"cert_us_mean\":" << tm * 1e6 << ",\"cert_global_us_mean\":" << gm * 1e6 << ",\"cert_us_p50\":" << pct(tc, 0.5) * 1e6 << ",\"cert_us_p99\":" << pct(tc, 0.99) * 1e6
            << ",\"candidates_mean\":" << cm << ",\"refined_queries\":" << refined_q << ",\"refined_objects_mean\":" << rm << ",\"exact_answers\":" << correct
            << ",\"est_recall\":" << recall << ",\"est_worst_ratio\":" << ratio_max << ",\"pruned_ms_mean\":" << bm * 1e3

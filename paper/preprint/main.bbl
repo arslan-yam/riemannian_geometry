@@ -1,0 +1,369 @@
+%%% -*-BibTeX-*-
+%%% Do NOT edit. File created by BibTeX with style
+%%% ACM-Reference-Format-Journals [18-Jan-2012].
+
+\begin{thebibliography}{28}
+
+%%% ====================================================================
+%%% NOTE TO THE USER: you can override these defaults by providing
+%%% customized versions of any of these macros before the \bibliography
+%%% command.  Each of them MUST provide its own final punctuation,
+%%% except for \shownote{} and \showURL{}.  The latter two
+%%% do not use final punctuation, in order to avoid confusing it with
+%%% the Web address.
+%%%
+%%% To suppress output of a particular field, define its macro to expand
+%%% to an empty string, or better, \unskip, like this:
+%%%
+%%% \newcommand{\showURL}[1]{\unskip}   % LaTeX syntax
+%%%
+%%% \def \showURL #1{\unskip}           % plain TeX syntax
+%%%
+%%% ====================================================================
+
+\ifx \showCODEN    \undefined \def \showCODEN     #1{\unskip}     \fi
+\ifx \showISBNx    \undefined \def \showISBNx     #1{\unskip}     \fi
+\ifx \showISBNxiii \undefined \def \showISBNxiii  #1{\unskip}     \fi
+\ifx \showISSN     \undefined \def \showISSN      #1{\unskip}     \fi
+\ifx \showLCCN     \undefined \def \showLCCN      #1{\unskip}     \fi
+\ifx \shownote     \undefined \def \shownote      #1{#1}          \fi
+\ifx \showarticletitle \undefined \def \showarticletitle #1{#1}   \fi
+\ifx \showURL      \undefined \def \showURL       {\relax}        \fi
+% The following commands are used for tagged output and should be
+% invisible to TeX
+\providecommand\bibfield[2]{#2}
+\providecommand\bibinfo[2]{#2}
+\providecommand\natexlab[1]{#1}
+\providecommand\showeprint[2][]{arXiv:#2}
+
+\bibitem[Abraham et~al\mbox{.}(2011)]%
+        {abraham2011hub}
+\bibfield{author}{\bibinfo{person}{Ittai Abraham}, \bibinfo{person}{Daniel
+  Delling}, \bibinfo{person}{Andrew~V. Goldberg}, {and}
+  \bibinfo{person}{Renato~F. Werneck}.} \bibinfo{year}{2011}\natexlab{}.
+\newblock \showarticletitle{A Hub-Based Labeling Algorithm for Shortest Paths
+  in Road Networks}. In \bibinfo{booktitle}{\emph{Experimental Algorithms
+  (SEA)}}. \bibinfo{pages}{230--241}.
+\newblock
+
+
+\bibitem[Adikusuma et~al\mbox{.}(2020)]%
+        {adikusuma2020fast}
+\bibfield{author}{\bibinfo{person}{Yohanes~Yudhi Adikusuma},
+  \bibinfo{person}{Zheng Fang}, {and} \bibinfo{person}{Ying He}.}
+  \bibinfo{year}{2020}\natexlab{}.
+\newblock \showarticletitle{Fast Construction of Discrete Geodesic Graphs}.
+\newblock \bibinfo{journal}{\emph{ACM Transactions on Graphics}}
+  \bibinfo{volume}{39}, \bibinfo{number}{2} (\bibinfo{year}{2020}),
+  \bibinfo{pages}{14:1--14:14}.
+\newblock
+
+
+\bibitem[Akiba et~al\mbox{.}(2013)]%
+        {akiba2013fast}
+\bibfield{author}{\bibinfo{person}{Takuya Akiba}, \bibinfo{person}{Yoichi
+  Iwata}, {and} \bibinfo{person}{Yuichi Yoshida}.}
+  \bibinfo{year}{2013}\natexlab{}.
+\newblock \showarticletitle{Fast Exact Shortest-Path Distance Queries on Large
+  Networks by Pruned Landmark Labeling}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 2013 ACM SIGMOD International
+  Conference on Management of Data}}. \bibinfo{pages}{349--360}.
+\newblock
+
+
+\bibitem[Aleksandrov et~al\mbox{.}(2010)]%
+        {aleksandrov2010algorithms}
+\bibfield{author}{\bibinfo{person}{Lyudmil Aleksandrov},
+  \bibinfo{person}{Hristo~N. Djidjev}, \bibinfo{person}{Hua Guo},
+  \bibinfo{person}{Anil Maheshwari}, \bibinfo{person}{Doron Nussbaum}, {and}
+  \bibinfo{person}{J{\"o}rg-R{\"u}diger Sack}.}
+  \bibinfo{year}{2010}\natexlab{}.
+\newblock \showarticletitle{Algorithms for Approximate Shortest Path Queries on
+  Weighted Polyhedral Surfaces}.
+\newblock \bibinfo{journal}{\emph{Discrete \& Computational Geometry}}
+  \bibinfo{volume}{44}, \bibinfo{number}{4} (\bibinfo{year}{2010}),
+  \bibinfo{pages}{762--801}.
+\newblock
+
+
+\bibitem[Aleksandrov et~al\mbox{.}(2005)]%
+        {aleksandrov2005determining}
+\bibfield{author}{\bibinfo{person}{Lyudmil Aleksandrov}, \bibinfo{person}{Anil
+  Maheshwari}, {and} \bibinfo{person}{J{\"o}rg-R{\"u}diger Sack}.}
+  \bibinfo{year}{2005}\natexlab{}.
+\newblock \showarticletitle{Determining Approximate Shortest Paths on Weighted
+  Polyhedral Surfaces}.
+\newblock \bibinfo{journal}{\emph{J. ACM}} \bibinfo{volume}{52},
+  \bibinfo{number}{1} (\bibinfo{year}{2005}), \bibinfo{pages}{25--53}.
+\newblock
+
+
+\bibitem[Bentley(1975)]%
+        {bentley1975multidimensional}
+\bibfield{author}{\bibinfo{person}{Jon~Louis Bentley}.}
+  \bibinfo{year}{1975}\natexlab{}.
+\newblock \showarticletitle{Multidimensional Binary Search Trees Used for
+  Associative Searching}.
+\newblock \bibinfo{journal}{\emph{Commun. ACM}} \bibinfo{volume}{18},
+  \bibinfo{number}{9} (\bibinfo{year}{1975}), \bibinfo{pages}{509--517}.
+\newblock
+
+
+\bibitem[Chen and Han(1990)]%
+        {chen1990shortest}
+\bibfield{author}{\bibinfo{person}{Jindong Chen} {and} \bibinfo{person}{Yijie
+  Han}.} \bibinfo{year}{1990}\natexlab{}.
+\newblock \showarticletitle{Shortest Paths on a Polyhedron}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the Sixth Annual Symposium on
+  Computational Geometry (SoCG)}}. \bibinfo{pages}{360--369}.
+\newblock
+
+
+\bibitem[Crane et~al\mbox{.}(2013)]%
+        {crane2013geodesics}
+\bibfield{author}{\bibinfo{person}{Keenan Crane}, \bibinfo{person}{Clarisse
+  Weischedel}, {and} \bibinfo{person}{Max Wardetzky}.}
+  \bibinfo{year}{2013}\natexlab{}.
+\newblock \showarticletitle{Geodesics in Heat: A New Approach to Computing
+  Distance Based on Heat Flow}.
+\newblock \bibinfo{journal}{\emph{ACM Transactions on Graphics}}
+  \bibinfo{volume}{32}, \bibinfo{number}{5} (\bibinfo{year}{2013}),
+  \bibinfo{pages}{152:1--152:11}.
+\newblock
+
+
+\bibitem[Djidjev and Sommer(2011)]%
+        {djidjev2011approximate}
+\bibfield{author}{\bibinfo{person}{Hristo~N. Djidjev} {and}
+  \bibinfo{person}{Christian Sommer}.} \bibinfo{year}{2011}\natexlab{}.
+\newblock \showarticletitle{Approximate Distance Queries for Weighted
+  Polyhedral Surfaces}. In \bibinfo{booktitle}{\emph{Algorithms -- ESA 2011}}
+  \emph{(\bibinfo{series}{Lecture Notes in Computer Science},
+  Vol.~\bibinfo{volume}{6942})}. \bibinfo{pages}{579--590}.
+\newblock
+
+
+\bibitem[Gavoille et~al\mbox{.}(2004)]%
+        {gavoille2004distance}
+\bibfield{author}{\bibinfo{person}{Cyril Gavoille}, \bibinfo{person}{David
+  Peleg}, \bibinfo{person}{St{\'e}phane P{\'e}rennes}, {and}
+  \bibinfo{person}{Ran Raz}.} \bibinfo{year}{2004}\natexlab{}.
+\newblock \showarticletitle{Distance Labeling in Graphs}.
+\newblock \bibinfo{journal}{\emph{Journal of Algorithms}} \bibinfo{volume}{53},
+  \bibinfo{number}{1} (\bibinfo{year}{2004}), \bibinfo{pages}{85--112}.
+\newblock
+
+
+\bibitem[Huang et~al\mbox{.}(2023)]%
+        {huang2023ear}
+\bibfield{author}{\bibinfo{person}{Bo Huang}, \bibinfo{person}{Victor~Junqiu
+  Wei}, \bibinfo{person}{Raymond Chi-Wing Wong}, {and} \bibinfo{person}{Bo
+  Tang}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{{EAR-Oracle}: On Efficient Indexing for Distance
+  Queries between Arbitrary Points on Terrain Surface}.
+\newblock \bibinfo{journal}{\emph{Proceedings of the ACM on Management of Data
+  (SIGMOD)}} \bibinfo{volume}{1}, \bibinfo{number}{1} (\bibinfo{year}{2023}).
+\newblock
+
+
+\bibitem[Kaul et~al\mbox{.}(2015)]%
+        {kaul2015new}
+\bibfield{author}{\bibinfo{person}{Manohar Kaul}, \bibinfo{person}{Raymond
+  Chi-Wing Wong}, {and} \bibinfo{person}{Christian~S. Jensen}.}
+  \bibinfo{year}{2015}\natexlab{}.
+\newblock \showarticletitle{New Lower and Upper Bounds for Shortest Distance
+  Queries on Terrains}.
+\newblock \bibinfo{journal}{\emph{Proceedings of the VLDB Endowment}}
+  \bibinfo{volume}{9}, \bibinfo{number}{3} (\bibinfo{year}{2015}),
+  \bibinfo{pages}{168--179}.
+\newblock
+
+
+\bibitem[Kaul et~al\mbox{.}(2013)]%
+        {kaul2013finding}
+\bibfield{author}{\bibinfo{person}{Manohar Kaul}, \bibinfo{person}{Raymond
+  Chi-Wing Wong}, \bibinfo{person}{Bin Yang}, {and}
+  \bibinfo{person}{Christian~S. Jensen}.} \bibinfo{year}{2013}\natexlab{}.
+\newblock \showarticletitle{Finding Shortest Paths on Terrains by Killing Two
+  Birds with One Stone}.
+\newblock \bibinfo{journal}{\emph{Proceedings of the VLDB Endowment}}
+  \bibinfo{volume}{7}, \bibinfo{number}{1} (\bibinfo{year}{2013}),
+  \bibinfo{pages}{73--84}.
+\newblock
+
+
+\bibitem[Kawarabayashi et~al\mbox{.}(2011)]%
+        {kawarabayashi2011linear}
+\bibfield{author}{\bibinfo{person}{Ken-ichi Kawarabayashi},
+  \bibinfo{person}{Philip~N. Klein}, {and} \bibinfo{person}{Christian Sommer}.}
+  \bibinfo{year}{2011}\natexlab{}.
+\newblock \showarticletitle{Linear-Space Approximate Distance Oracles for
+  Planar, Bounded-Genus and Minor-Free Graphs}. In
+  \bibinfo{booktitle}{\emph{Automata, Languages and Programming (ICALP)}}.
+  \bibinfo{pages}{135--146}.
+\newblock
+
+
+\bibitem[Kimmel and Sethian(1998)]%
+        {kimmel1998computing}
+\bibfield{author}{\bibinfo{person}{Ron Kimmel} {and} \bibinfo{person}{James~A.
+  Sethian}.} \bibinfo{year}{1998}\natexlab{}.
+\newblock \showarticletitle{Computing Geodesic Paths on Manifolds}.
+\newblock \bibinfo{journal}{\emph{Proceedings of the National Academy of
+  Sciences}} \bibinfo{volume}{95}, \bibinfo{number}{15} (\bibinfo{year}{1998}),
+  \bibinfo{pages}{8431--8435}.
+\newblock
+
+
+\bibitem[Klein(2002)]%
+        {klein2002preprocessing}
+\bibfield{author}{\bibinfo{person}{Philip~N. Klein}.}
+  \bibinfo{year}{2002}\natexlab{}.
+\newblock \showarticletitle{Preprocessing an Undirected Planar Network to
+  Enable Fast Approximate Distance Queries}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the Thirteenth Annual ACM-SIAM
+  Symposium on Discrete Algorithms (SODA)}}. \bibinfo{pages}{820--827}.
+\newblock
+
+
+\bibitem[Lipton and Tarjan(1979)]%
+        {lipton1979separator}
+\bibfield{author}{\bibinfo{person}{Richard~J. Lipton} {and}
+  \bibinfo{person}{Robert~Endre Tarjan}.} \bibinfo{year}{1979}\natexlab{}.
+\newblock \showarticletitle{A Separator Theorem for Planar Graphs}.
+\newblock \bibinfo{journal}{\emph{SIAM J. Appl. Math.}} \bibinfo{volume}{36},
+  \bibinfo{number}{2} (\bibinfo{year}{1979}), \bibinfo{pages}{177--189}.
+\newblock
+
+
+\bibitem[Mitchell et~al\mbox{.}(1987)]%
+        {mitchell1987discrete}
+\bibfield{author}{\bibinfo{person}{Joseph S.~B. Mitchell},
+  \bibinfo{person}{David~M. Mount}, {and} \bibinfo{person}{Christos~H.
+  Papadimitriou}.} \bibinfo{year}{1987}\natexlab{}.
+\newblock \showarticletitle{The Discrete Geodesic Problem}.
+\newblock \bibinfo{journal}{\emph{SIAM J. Comput.}} \bibinfo{volume}{16},
+  \bibinfo{number}{4} (\bibinfo{year}{1987}), \bibinfo{pages}{647--668}.
+\newblock
+
+
+\bibitem[Ouyang et~al\mbox{.}(2018)]%
+        {ouyang2018hierarchy}
+\bibfield{author}{\bibinfo{person}{Dian Ouyang}, \bibinfo{person}{Lu Qin},
+  \bibinfo{person}{Lijun Chang}, \bibinfo{person}{Xuemin Lin},
+  \bibinfo{person}{Ying Zhang}, {and} \bibinfo{person}{Qing Zhu}.}
+  \bibinfo{year}{2018}\natexlab{}.
+\newblock \showarticletitle{When Hierarchy Meets 2-Hop-Labeling: Efficient
+  Shortest Distance Queries on Road Networks}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 2018 International Conference on
+  Management of Data (SIGMOD)}}. \bibinfo{pages}{709--724}.
+\newblock
+
+
+\bibitem[Qin et~al\mbox{.}(2016)]%
+        {qin2016fast}
+\bibfield{author}{\bibinfo{person}{Yipeng Qin}, \bibinfo{person}{Xiaoguang
+  Han}, \bibinfo{person}{Hongchuan Yu}, \bibinfo{person}{Yizhou Yu}, {and}
+  \bibinfo{person}{Jianjun Zhang}.} \bibinfo{year}{2016}\natexlab{}.
+\newblock \showarticletitle{Fast and Exact Discrete Geodesic Computation Based
+  on Triangle-Oriented Wavefront Propagation}.
+\newblock \bibinfo{journal}{\emph{ACM Transactions on Graphics}}
+  \bibinfo{volume}{35}, \bibinfo{number}{4} (\bibinfo{year}{2016}),
+  \bibinfo{pages}{125:1--125:13}.
+\newblock
+
+
+\bibitem[Surazhsky et~al\mbox{.}(2005)]%
+        {surazhsky2005fast}
+\bibfield{author}{\bibinfo{person}{Vitaly Surazhsky}, \bibinfo{person}{Tatiana
+  Surazhsky}, \bibinfo{person}{Danil Kirsanov}, \bibinfo{person}{Steven~J.
+  Gortler}, {and} \bibinfo{person}{Hugues Hoppe}.}
+  \bibinfo{year}{2005}\natexlab{}.
+\newblock \showarticletitle{Fast Exact and Approximate Geodesics on Meshes}.
+\newblock \bibinfo{journal}{\emph{ACM Transactions on Graphics}}
+  \bibinfo{volume}{24}, \bibinfo{number}{3} (\bibinfo{year}{2005}),
+  \bibinfo{pages}{553--560}.
+\newblock
+
+
+\bibitem[Thorup(2004)]%
+        {thorup2004compact}
+\bibfield{author}{\bibinfo{person}{Mikkel Thorup}.}
+  \bibinfo{year}{2004}\natexlab{}.
+\newblock \showarticletitle{Compact Oracles for Reachability and Approximate
+  Distances in Planar Digraphs}.
+\newblock \bibinfo{journal}{\emph{J. ACM}} \bibinfo{volume}{51},
+  \bibinfo{number}{6} (\bibinfo{year}{2004}), \bibinfo{pages}{993--1024}.
+\newblock
+
+
+\bibitem[Wei et~al\mbox{.}(2017)]%
+        {wei2017distance}
+\bibfield{author}{\bibinfo{person}{Victor~Junqiu Wei}, \bibinfo{person}{Raymond
+  Chi-Wing Wong}, \bibinfo{person}{Cheng Long}, {and} \bibinfo{person}{David~M.
+  Mount}.} \bibinfo{year}{2017}\natexlab{}.
+\newblock \showarticletitle{Distance Oracle on Terrain Surface}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 2017 ACM International
+  Conference on Management of Data (SIGMOD)}}. \bibinfo{pages}{1211--1226}.
+\newblock
+
+
+\bibitem[Xin and Wang(2009)]%
+        {xin2009improving}
+\bibfield{author}{\bibinfo{person}{Shi-Qing Xin} {and} \bibinfo{person}{Guo-Jin
+  Wang}.} \bibinfo{year}{2009}\natexlab{}.
+\newblock \showarticletitle{Improving {C}hen and {H}an's Algorithm on the
+  Discrete Geodesic Problem}.
+\newblock \bibinfo{journal}{\emph{ACM Transactions on Graphics}}
+  \bibinfo{volume}{28}, \bibinfo{number}{4} (\bibinfo{year}{2009}),
+  \bibinfo{pages}{104:1--104:8}.
+\newblock
+
+
+\bibitem[Yan and Wong(2024)]%
+        {yan2024rc}
+\bibfield{author}{\bibinfo{person}{Yinzhao Yan} {and} \bibinfo{person}{Raymond
+  Chi-Wing Wong}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \showarticletitle{Proximity Queries on Point Clouds using Rapid
+  Construction Path Oracle}.
+\newblock \bibinfo{journal}{\emph{Proceedings of the ACM on Management of Data
+  (SIGMOD)}} \bibinfo{volume}{2}, \bibinfo{number}{1} (\bibinfo{year}{2024}).
+\newblock
+
+
+\bibitem[Yan et~al\mbox{.}(2025)]%
+        {yan2025up}
+\bibfield{author}{\bibinfo{person}{Yinzhao Yan}, \bibinfo{person}{Raymond
+  Chi-Wing Wong}, {and} \bibinfo{person}{Christian~S. Jensen}.}
+  \bibinfo{year}{2025}\natexlab{}.
+\newblock \showarticletitle{An Efficiently Updatable Path Oracle for Terrain
+  Surfaces}.
+\newblock \bibinfo{journal}{\emph{IEEE Transactions on Knowledge and Data
+  Engineering}}  \bibinfo{volume}{37} (\bibinfo{year}{2025}).
+\newblock
+
+
+\bibitem[Ying et~al\mbox{.}(2013)]%
+        {ying2013saddle}
+\bibfield{author}{\bibinfo{person}{Xiang Ying}, \bibinfo{person}{Xiaoning
+  Wang}, {and} \bibinfo{person}{Ying He}.} \bibinfo{year}{2013}\natexlab{}.
+\newblock \showarticletitle{Saddle Vertex Graph ({SVG}): A Novel Solution to
+  the Discrete Geodesic Problem}.
+\newblock \bibinfo{journal}{\emph{ACM Transactions on Graphics}}
+  \bibinfo{volume}{32}, \bibinfo{number}{6} (\bibinfo{year}{2013}),
+  \bibinfo{pages}{170:1--170:12}.
+\newblock
+
+
+\bibitem[Zhang et~al\mbox{.}(2023)]%
+        {zhang2023neurogf}
+\bibfield{author}{\bibinfo{person}{Qijian Zhang}, \bibinfo{person}{Junhui Hou},
+  \bibinfo{person}{Yohanes~Yudhi Adikusuma}, \bibinfo{person}{Wenping Wang},
+  {and} \bibinfo{person}{Ying He}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{{NeuroGF}: A Neural Representation for Fast
+  Geodesic Distance and Path Queries}. In \bibinfo{booktitle}{\emph{Advances in
+  Neural Information Processing Systems (NeurIPS)}}.
+\newblock
+
+
+\end{thebibliography}
