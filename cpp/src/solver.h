@@ -21,8 +21,10 @@ struct Solver {
 // distance bound); the distances are identical to a full sweep
 Solver* make_mmp(const std::vector<double>& V, const std::vector<unsigned>& F, bool early_stop);
 // VTP sweeps the whole (sub-)mesh: its vertex queue does not make a popped vertex final, so there
-// is no exact early stop. Returns nullptr if VTP's own mesh checks reject the mesh
-Solver* make_vtp(const std::vector<double>& V, const std::vector<unsigned>& F);
+// is no exact early stop. Returns nullptr if VTP's own mesh checks reject the mesh. split_parts: a mesh in
+// several edge-connected pieces is swept piece by piece (VTP rejects it otherwise); exact when no vertex is
+// shared by two pieces (else rejected)
+Solver* make_vtp(const std::vector<double>& V, const std::vector<unsigned>& F, bool split_parts = false);
 // weighted terrains: Dijkstra on the Steiner graph with m points per edge (face weights W, one per face);
 // upper bounds of the weighted geodesic distance (no exact solver exists for weighted regions)
 Solver* make_steiner(const std::vector<double>& V, const std::vector<unsigned>& F, const std::vector<double>& W, int m);

@@ -210,8 +210,14 @@ $\max(g_C, 2\varepsilon\lambda c)$). Lemma 3 (soundness) does not use the gap, s
 pair. Lemma 4 needs $g_C \le \varepsilon d$; when that fails the interval may be wide, and the query then
 computes the pair exactly (one MMP sweep from $s$ stopped at $t$ on the faces meeting
 $\mathrm{bbox}(s,t)$ dilated by $\mathrm{UB}/(2\lambda)$ — ellipse lemma). **Theorem A.** Every answer satisfies
-$\mathrm{UB} \le (1+\varepsilon)\,\mathrm{LB} \le (1+\varepsilon)\,d$, or is exact. Labels per vertex $\le k \cdot$ depth, i.e.
-$O(nk\log n)$ in total; a uniform random pair needs the exact route with probability about
+$\mathrm{UB} \le (1+\varepsilon)\,\mathrm{LB} \le (1+\varepsilon)\,d$, or is exact. Per cut: at most $k$ box portals, plus the tails.
+With $g_C \approx \sigma D_C/k$, a tail steps $g_C$ until the offset reaches $g_C/(2\varepsilon\lambda)$, which takes
+$O(1/(\varepsilon\lambda))$ portals. It then grows geometrically up to $\mu_C/\lambda \approx D_C/\lambda$, which takes
+$O\big(\frac{\sigma}{\varepsilon\lambda}\log\frac{2\varepsilon k}{\sigma}\big)$ portals. So a cut has
+$k + O(\varepsilon^{-1}\log k)$ portals, labels per vertex are $\le (k + O(\varepsilon^{-1}\log k))\cdot$ depth, and the
+total is $O((k+\varepsilon^{-1}\log k)\,n\log n)$. The cap bounds the label sweeps the same way: a level has
+$2^\ell$ cuts of $k + O(\varepsilon^{-1}\log k)$ sweeps over $\Theta(n/2^\ell)$ faces, so the build is
+$O((k+\varepsilon^{-1}\log k)\,n\log^2 n)$ for $O(m\log m)$ sweeps, against $\Theta(n^{1.5}\log n)$ uncapped; a uniform random pair needs the exact route with probability about
 $2\pi/(k\varepsilon)^3$ (it must straddle a capped cut closer than $g_C/\varepsilon$).
 
 **Shifted hierarchy** (`Options::hierarchy = "shifted"`). Three regular quadtrees over the chart, copy $j$
@@ -336,3 +342,35 @@ $w_f\times$ length) and shared by every search.
 - **Measured.** Weighted HorseMount (the competitors' weights), ε 0.1, against Steiner m = 24: estimate
   mean error 0.38% (m = 5) and 0.23% (m = 10). The Python version gave 0.35% / 0.20% against the best
   path of any method.
+
+**Obstacles as holes** (`scripts/competitors/make_obstacles.py`, server phase `obstacles`). An obstacle
+removes the faces whose chart centroid lies inside it, so the surface gets a hole and paths go around it.
+The kinds are disks covering a given fraction of the area, and walls with gaps. The certificate needs no
+change, for four reasons:
+- **Lower bounds.** A hole only lengthens paths, so every chart lower bound (chord, $\lambda|S-T|$)
+  still holds.
+- **Windows.** $\mu_C$ is a graph distance on the holed mesh, so a detour widens the window by itself,
+  and the tails cover the crossing.
+- **Cut lines.** A path from one side of a cut line to the other crosses it at a surface point. A line
+  broken by holes gives several runs (`line_pieces`), each bracketed by portals at its ends.
+- **Near tables.** A table holds every pair within chart radius $R$, with the exact distance on a
+  sub-mesh dilated by a graph upper bound (ellipse lemma). A pair close in the chart but separated by a
+  wall is therefore exact too, and a pair not in the table has $d \ge \lambda|S-T| > g/\varepsilon$.
+
+Measured on Gunnison10k (disks covering 10% and 20%, six walls), ε 0.2:
+- every answer is sound, uncapped and with cap 64, over random, near, band and A2A pairs, and over 208
+  pairs with detour ratio $d/|st| \ge 1.2$;
+- estimate mean error 0.03–0.04%, the same as without obstacles.
+
+*Two pitfalls found on the way (both handled):*
+1. **Touching holes.** Two holes touching at one vertex make it non-manifold (two fans of faces).
+   Kirsanov's MMP then returns distances up to 5% too long, longer than a Steiner-graph path, while VTP
+   stays exact. The generator therefore splits such vertices, keeping the largest fan, and keeps the
+   largest connected piece. On the cleaned meshes MMP and VTP agree to $10^{-15}$, and the phase checks
+   that on every obstacle mesh (`obst.onthefly`).
+2. **Disconnected sub-meshes.** A sub-mesh cut from a holed terrain can fall into several pieces. VTP
+   links its window lists from the first edge only and rejects such a mesh, so the cut falls back to
+   MMP. `--exact vtp` (`Options::exact`) takes VTP for every exact computation (truth, labels, near
+   tables, refine, A2A; surface points become inserted vertices). It closes the fans at non-manifold
+   sub-mesh vertices, which only adds faces, and sweeps each piece on its own; MMP fallbacks are
+   counted. On the cleaned meshes it gives the same results as the default solvers.

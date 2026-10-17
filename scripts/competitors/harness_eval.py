@@ -1,7 +1,9 @@
 """Score logs of the competitors' harness (EAR authors' code, scripts/competitors/run_competitors.sh) against
 the exact distances that cpp/tools/cci_exp.cpp --export wrote next to the query file.
 
-usage: python3 scripts/competitors/harness_eval.py <truth file> <log>... [--json out.json]
+usage: python3 scripts/competitors/harness_eval.py <truth file> <log>... [--json out.json] [--detour file]
+--detour: the per-pair detour ratios (cci_exp --export writes PREFIX.V2V.detour); adds the errors by detour
+band [1, 1.01), [1.01, 1.05), [1.05, 1.2), >= 1.2, as cci_exp --detour-sets
 
 V2V queries were moved 5 cm into a face (the harness cannot locate a point exactly at a vertex), so each
 harness answer may differ from the vertex-to-vertex truth by up to 0.1 m (2 x 5 cm); the "below truth"
@@ -26,9 +28,11 @@ def parse(log):
 
 def main():
     args = sys.argv[1:]
-    js = None
+    js = det = None
     if "--json" in args:
         i = args.index("--json"); js = args[i + 1]; del args[i:i + 2]
+    if "--detour" in args:
+        i = args.index("--detour"); det = np.loadtxt(args[i + 1]).reshape(-1); del args[i:i + 2]
     truth = np.loadtxt(args[0])
     rows = []
     for log in args[1:]:
@@ -40,6 +44,13 @@ def main():
             r.update(pairs=int(len(a)), err_mean=float(np.abs(rel).mean() * 100), err_p99=float(np.percentile(np.abs(rel), 99) * 100),
                      err_max=float(np.abs(rel).max() * 100), err_min_signed=float(rel.min() * 100),
                      below_truth=int((a < t - 0.1).sum()), query_us_mean=float(r.pop("query_us").mean()))
+            if det is not None:
+                cut, r["detour"] = [1.0, 1.01, 1.05, 1.2, 1e9], []
+                for b in range(4):
+                    m = (det[:len(a)] >= cut[b]) & (det[:len(a)] < cut[b + 1])
+                    if m.any():
+                        r["detour"].append({"set": f"detour{b}", "lo": cut[b], "hi": cut[b + 1], "pairs": int(m.sum()),
+                                            "err_mean": float(np.abs(rel[m]).mean() * 100), "err_max": float(np.abs(rel[m]).max() * 100)})
         rows.append(r)
         print(f"{r['log']}: " + (f"build {r['build_s']} s, index {r['index_MB']} MB, query {r['query_us_mean']:.1f} us, "
                                   f"|err| mean {r['err_mean']:.3f}% p99 {r['err_p99']:.3f}% max {r['err_max']:.3f}%, "

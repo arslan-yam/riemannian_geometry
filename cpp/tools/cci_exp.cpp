@@ -9,7 +9,9 @@
 //                [--near-store sym] [--near-variants dense,sym,sym16,sym8] [--near-pairs N [--near-truth-cache f]]
 // --random 0 with --near-pairs N evaluates the near pairs only.
 //                [--sources S --per-source 10] [--buckets k --bucket-sources 100] [--a2a-sources S --a2a-per-source 5]
-//                [--export prefix]   (prefix.{V2V,A2A}.{query,truth} for the competitors' harness)
+//                [--export prefix]   (prefix.{V2V,A2A}.{query,truth} for the competitors' harness, prefix.V2V.detour)
+//                [--detour-sets]   (the random pairs again, by detour ratio d / |s - t|: sets detour0..3)
+//                [--exact vtp]   (VTP for the truth and every exact solve of the index: meshes with holes)
 //                [--weights f --solver steiner --steiner-m 5 --truth-steiner 24]   (weighted terrain)
 // POI mode indexes only the POIs and draws the query pairs among them; --poi-table also builds the plain
 // exact baseline (one full VTP sweep per POI, a P x P float32 table) and times it.
@@ -46,7 +48,7 @@ int main(int argc, char** argv) {
     int n_sources = 0, per_source = 10, buckets = 0, bucket_sources = 100, a2a_sources = 0, a2a_per_source = 5;
     std::string poi_file, near_variants, near_truth_cache, export_prefix, interp_variants, weights_file;
     int truth_steiner = 0;
-    bool refine = false, poi_table = false, truth_only = false;
+    bool refine = false, poi_table = false, truth_only = false, detour_sets = false;
     for (int i = 2; i < argc; ++i) {
         std::string a = argv[i];
         auto nx = [&]() { return std::string(argv[++i]); };
@@ -79,6 +81,8 @@ int main(int argc, char** argv) {
         else if (a == "--a2a-sources") a2a_sources = std::stoi(nx()); // A2A set = points x --a2a-per-source
         else if (a == "--a2a-per-source") a2a_per_source = std::stoi(nx());
         else if (a == "--export") export_prefix = nx();               // harness query files + exact truths
+        else if (a == "--detour-sets") detour_sets = true;             // random pairs by detour ratio (obstacles)
+        else if (a == "--exact") opt.exact = nx();                    // mmp | vtp: the exact solver (truth and index)
         else if (a == "--interp-variants") interp_variants = nx();     // 0,1,2: estimate interpolation, one build
         else if (a == "--weights") weights_file = nx();               // face weights, one per line (weighted terrain)
         else if (a == "--steiner-m") opt.steiner_m = std::stoi(nx()); // weighted: Steiner points per edge of the labels
@@ -104,7 +108,13 @@ int main(int argc, char** argv) {
     if (weighted && truth_steiner <= 0) { std::fprintf(stderr, "weighted terrain: no exact solver; give --truth-steiner M (reference Steiner graph)\n"); return 1; }
     // the solver of the truth: exact MMP (early stop), or on a weighted terrain a fine Steiner graph (a
     // reference: graph distances are upper bounds that converge to the weighted distance)
-    auto truth_solver = [&]() -> Solver* { return truth_steiner > 0 ? make_steiner(T.V, T.F, T.w, truth_steiner) : make_mmp(T.V, T.F, true); };
+    // (--exact vtp: full VTP sweeps; Kirsanov's MMP returns too-long distances on some meshes with holes)
+    auto truth_solver = [&]() -> Solver* {
+        if (truth_steiner > 0) return make_steiner(T.V, T.F, T.w, truth_steiner);
+        if (opt.exact == "vtp") { if (Solver* s = make_vtp(T.V, T.F, true)) return s; std::fprintf(stderr, "VTP rejects the mesh: MMP truth\n"); }
+        return make_mmp(T.V, T.F, true);
+    };
+    int truth_fallbacks = 0; // exact = vtp: A2A truths that fell back to MMP
     if (poi_random > 0) {
         std::mt19937_64 rng(poi_seed);
         std::vector<int> all(T.n);
@@ -225,6 +235,26 @@ int main(int argc, char** argv) {
                 if (!S.cache.empty() && !std::ifstream(S.cache).good()) { std::ofstream o(S.cache); o.precision(17); for (double d : S.tr) o << d << "\n"; }
         }
     }
+    // the detour ratio of a pair: d over the 3-d straight line (a lower bound of d, so >= 1); relief alone
+    // keeps it near 1, obstacles push it up
+    auto detour = [&](int s, int t, double d) {
+        double e = 0;
+        for (int j = 0; j < 3; ++j) { double u = T.V[3 * s + j] - T.V[3 * t + j]; e += u * u; }
+        return d / std::max(std::sqrt(e), 1e-12);
+    };
+    // --detour-sets: the random pairs again, split by detour ratio [1, 1.01), [1.01, 1.05), [1.05, 1.2), >= 1.2
+    if (detour_sets && !sets.empty() && sets[0].name == "random") {
+        const PairSet R = sets[0];
+        const double cut[5] = {1.0, 1.01, 1.05, 1.2, 1e9};
+        for (int b = 0; b < 4; ++b) {
+            PairSet D; D.name = "detour" + std::to_string(b); D.lo = cut[b]; D.hi = cut[b + 1];
+            for (size_t i = 0; i < R.qp.size(); ++i) {
+                double r = detour(R.qp[i].first, R.qp[i].second, R.tr[i]);
+                if (r >= D.lo && r < D.hi) { D.qp.push_back(R.qp[i]); D.tr.push_back(R.tr[i]); }
+            }
+            if (!D.qp.empty()) sets.push_back(std::move(D));
+        }
+    }
     // arbitrary surface points: uniform random face, uniform barycentric coordinates (as the competitors'
     // generator); truth by MMP from the source point on the whole mesh, early stop at its targets
     std::vector<std::pair<APoint, APoint>> aq;
@@ -250,7 +280,11 @@ int main(int argc, char** argv) {
                 SurfPt sp{(unsigned)p.f, p.x, p.y, T.z_at(p.f, p.x, p.y)};
                 std::vector<SurfPt> tg;
                 for (int k = 0; k < a2a_per_source; ++k) { const APoint& q = aq[i + k].second; tg.push_back({(unsigned)q.f, q.x, q.y, T.z_at(q.f, q.x, q.y)}); }
-                sol->point_dists(sp, tg, &atr[i]);
+                if (!sol->point_dists(sp, tg, &atr[i])) { // VTP rejected the mesh with the points inserted
+                    ++truth_fallbacks;
+                    std::unique_ptr<Solver> m(make_mmp(T.V, T.F, true));
+                    m->point_dists(sp, tg, &atr[i]);
+                }
             }
             if (!cache.empty()) { std::ofstream o(cache); o.precision(17); for (double d : atr) o << d << "\n"; }
         }
@@ -276,10 +310,12 @@ int main(int argc, char** argv) {
             o << buf;
         };
         if (!sets.empty() && sets[0].name == "random") {
-            std::ofstream q(export_prefix + ".V2V.query"), t(export_prefix + ".V2V.truth"), pr(export_prefix + ".V2V.pairs");
+            std::ofstream q(export_prefix + ".V2V.query"), t(export_prefix + ".V2V.truth"), pr(export_prefix + ".V2V.pairs"),
+                dt(export_prefix + ".V2V.detour");
             t.precision(17);
             for (size_t i = 0; i < sets[0].qp.size(); ++i) {
                 pr << sets[0].qp[i].first << " " << sets[0].qp[i].second << "\n"; // vertex pairs (DGG)
+                dt << detour(sets[0].qp[i].first, sets[0].qp[i].second, sets[0].tr[i]) << "\n"; // per pair (bucketed reports)
                 double a[3], b[3];
                 int fa = vpoint(sets[0].qp[i].first, a), fb = vpoint(sets[0].qp[i].second, b);
                 put(q, a, fa); q << " "; put(q, b, fb); q << "\n";
@@ -365,8 +401,9 @@ int main(int argc, char** argv) {
     for (int i = 0; i < argc; ++i) { for (const char* c = argv[i]; *c; ++c) { if (*c == '"' || *c == '\\') argv_s += '\\'; argv_s += *c; } if (i + 1 < argc) argv_s += ' '; }
     std::ostringstream js;
     js << "{\"argv\":\"" << argv_s << "\",\"mesh\":\"" << mesh << "\",\"n\":" << T.n << ",\"eps\":" << opt.eps << ",\"gap_factor\":" << opt.gap_factor
-       << ",\"hierarchy\":\"" << opt.hierarchy << "\",\"k_max\":" << opt.k_max << ",\"solver\":\"" << opt.solver
-       << "\",\"threads\":" << opt.threads << ",\"store\":\"" << opt.store << "\",\"near_store\":\"" << near_build
+       << ",\"hierarchy\":\"" << opt.hierarchy << "\",\"k_max\":" << opt.k_max << ",\"solver\":\"" << opt.solver << "\",\"exact\":\"" << opt.exact
+       << "\",\"truth_mmp_fallbacks\":" << truth_fallbacks << ",\"build_mmp_fallbacks\":" << ix.mmp_fallbacks.load() << ",\"sweeps_vtp\":" << ix.sweeps_vtp << ",\"sweeps_mmp\":" << ix.sweeps_mmp
+       << ",\"threads\":" << opt.threads << ",\"store\":\"" << opt.store << "\",\"near_store\":\"" << near_build
        << "\",\"pois\":" << opt.poi.size() << ",\"peak_rss_mb\":" << rss << table_js
        << ",\"build_s\":" << tb << ",\"cuts\":" << ix.cuts.size() << ",\"portals\":" << ix.portals() << ",\"labels\":" << ix.labels()
        << ",\"near_entries\":" << ix.near_total << ",\"timing\":{";
@@ -411,7 +448,11 @@ int main(int argc, char** argv) {
             std::vector<double> errs, widths;
             for (size_t i = 0; i < mq; ++i) {
                 double l = B[3 * i], u = B[3 * i + 1], est = B[3 * i + 2], d = D[i];
-                if (!(l <= d * (1 + 1e-9) && (weighted || d <= u * (1 + 1e-9)))) sound = false;
+                if (!(l <= d * (1 + 1e-9) && (weighted || d <= u * (1 + 1e-9)))) {
+                    if (sound) std::fprintf(stderr, "UNSOUND %s %s pair %zu: LB %.9g d %.9g UB %.9g (LB/d - 1 = %.3g, d/UB - 1 = %.3g)\n",
+                                            vname.c_str(), set.c_str(), i, l, d, u, l / d - 1, d / u - 1);
+                    sound = false;
+                }
                 ub_below += weighted && u < d * (1 - 1e-9);
                 double e = std::fabs(est / d - 1);
                 errs.push_back(e); emean += e; emax = std::max(emax, e);
@@ -436,7 +477,7 @@ int main(int argc, char** argv) {
             js << ",\"refine\":" << (refine ? "true" : "false")
                << ",\"index_bytes\":" << ix.nbytes() << ",\"prep_s\":" << tprep << ",\"query_us\":" << best * 1e6
                << ",\"query_us_refine_mean\":" << qmean * 1e6 << ",\"query_us_refine_p99\":" << qs[(size_t)(0.99 * (mq - 1))] * 1e6
-               << ",\"refined\":" << refined << ",\"pairs\":" << mq << ",\"sound\":" << (sound ? "true" : "false") << ",\"ub_below_reference\":" << ub_below
+               << ",\"refined\":" << refined << ",\"mmp_fallbacks\":" << ix.mmp_fallbacks.load() << ",\"pairs\":" << mq << ",\"sound\":" << (sound ? "true" : "false") << ",\"ub_below_reference\":" << ub_below
                << ",\"max_ub_err\":" << ubmax << ",\"ub_mean\":" << ubmean << ",\"est_mean\":" << emean << ",\"est_p99\":" << p99
                << ",\"est_max\":" << emax << ",\"width_median\":" << widths[mq / 2] << ",\"max_ub_over_lb\":" << worst_ratio
                << ",\"cover_entries\":" << ix.cover_entries << "}";

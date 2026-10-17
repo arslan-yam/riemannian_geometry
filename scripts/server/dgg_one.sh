@@ -4,15 +4,15 @@
 # usage: scripts/server/dgg_one.sh <mesh name, e.g. TJpre_500000> <eps, e.g. 0.001>
 set -eu
 cd "$(dirname "$0")/../.."
-M=$1; E=$2; O=results/server; ROOT=$PWD
+M=$1; E=$2; O=${RG_OUT:-results/server}; ROOT=$PWD; DB=${DGG_BIN:-$ROOT/cpp/bin}
 W=$O/dgg/$M.$E; mkdir -p $W
 cp $O/meshes/$M.off $W/
 head -200 $O/comp/$M.V2V.pairs > $W/pairs
 head -200 $O/comp/$M.V2V.truth > $W/truth
 cd $W
-${GTIME:-/usr/bin/time} -v $ROOT/cpp/bin/dgg_precompute f $M.off $E 1 > precompute.log 2> precompute.time
+${GTIME:-/usr/bin/time} -v $DB/dgg_precompute f $M.off $E 1 > precompute.log 2> precompute.time
 G=$(ls ${M}_FD*_c5.binary | head -1)
-$ROOT/cpp/bin/dgg_bench $G pairs truth --json bench.json > bench.log
+$DB/dgg_bench $G pairs truth --json bench.json > bench.log
 cat bench.log
 # one JSON: the queries (dgg_bench) + the precompute's wall time and peak memory (GNU time) + graph size
 python3 - "$ROOT" "$O/dgg.$M.$E.json" "$G" <<'PY'

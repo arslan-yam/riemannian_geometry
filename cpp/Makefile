@@ -7,7 +7,7 @@ VTPI = -Ithird_party/vtp -include cstring -include memory
 BIN = bin
 OBJ = $(BIN)/obj
 
-all: $(BIN)/solver_check $(BIN)/cci_bench $(BIN)/cci_exp $(BIN)/proximity
+all: $(BIN)/solver_check $(BIN)/cci_bench $(BIN)/cci_exp $(BIN)/proximity $(BIN)/ngf_data
 
 # competitors (their code, not part of `all`): the UP-Oracle authors' oracles behind a static driver
 UPO ?= ../external/UpdatedStructureTerrainCode/src
@@ -21,6 +21,10 @@ $(OBJ)/solver_vtp.o: src/solver_vtp.cpp src/solver.h
 	@mkdir -p $(OBJ); $(CXX) $(CXXFLAGS) -std=c++14 $(VTPI) -c $< -o $@
 $(BIN)/solver_check: tools/solver_check.cpp $(OBJ)/solver_mmp.o $(OBJ)/solver_vtp.o $(OBJ)/solver_steiner.o src/mesh_io.h
 	$(CXX) $(CXXFLAGS) $< $(OBJ)/solver_mmp.o $(OBJ)/solver_vtp.o $(OBJ)/solver_steiner.o -o $@
+
+# training data for the NeuroGF baseline (exact MMP sweeps and shortest paths)
+$(BIN)/ngf_data: tools/ngf_data.cpp src/mesh_io.h
+	@mkdir -p $(BIN); $(CXX) -O3 -std=c++14 -DNDEBUG -pthread $(KIR) $< -o $@
 
 $(OBJ)/solver_steiner.o: src/solver_steiner.cpp src/solver.h src/steiner.h
 	@mkdir -p $(OBJ); $(CXX) $(CXXFLAGS) -c $< -o $@

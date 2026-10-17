@@ -2,6 +2,7 @@
 // (theorem and proofs in notes/guarantee.md), with the label sweeps done by Kirsanov's MMP (early
 // stop at the members), by VTP (full sweeps of the label sub-mesh), or by a per-cut hybrid.
 #pragma once
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -77,6 +78,9 @@ struct Options {
     double eps = 0.1, gap_factor = 0.5, gap = 0, hub_slack = 4.0;
     int interp = 2;                 // 0 none, 1 parabola, 2 model
     std::string solver = "hybrid";  // mmp | vtp | hybrid (exact, unweighted) | steiner (weighted terrains)
+    std::string exact = "mmp";      // exact solver of the near tables, refines and A2A: mmp (early stop) | vtp
+                                    // (full sweeps; also forces VTP labels: Kirsanov's MMP returns too-long
+                                    // distances on some meshes with holes, VTP does not)
     int steiner_m = 5;              // steiner: points per mesh edge of the label graph
     double hybrid_ratio = 2.0;      // hybrid: VTP when sub-mesh faces <= ratio x faces of the members' box
     bool verbose = false;
@@ -133,6 +137,7 @@ class CertifiedIndex {
     std::map<std::string, double> timing;
     std::unique_ptr<SteinerGraph> sg; // weighted terrains (solver steiner): one graph for every label search
     int64_t sweeps_mmp = 0, sweeps_vtp = 0;
+    mutable std::atomic<int64_t> mmp_fallbacks{0}; // exact = vtp: sweeps that fell back to MMP (VTP rejected the sub-mesh)
 
     std::vector<int32_t> slot_of;    // vertex -> row in anc / row / depth_of / near tables (-1: not indexed)
     std::vector<int> poi_list;       // POI mode: the indexed vertices, ascending
@@ -199,6 +204,11 @@ class CertifiedIndex {
                  std::vector<double>& V2, std::vector<unsigned>& F2, std::vector<int>& remap_used,
                  std::vector<int>& pidx, std::vector<double>& Xu, std::vector<double>* W2 = nullptr) const;
     Solver* local_solver(const std::vector<double>& V2, const std::vector<unsigned>& F2, const std::vector<double>& W2) const;
+    Solver* exact_solver(const std::vector<double>& V2, const std::vector<unsigned>& F2) const;
+    // exact = vtp: adds the full ring of faces at every vertex where the selected faces meet in several fans
+    // (VTP rejects such sub-meshes; a superset only brings distances closer to the true ones)
+    void close_fans(std::vector<int>& faces) const;
+    std::vector<int> vf_ptr, vf_idx;  // exact = vtp: the faces around each vertex (CSR)
     double interp(const Cut& C, const double* f, int K, int i, int rs, int rt) const;
     bool near_lookup(int s, int t, double* out) const; // near pair from the tables of the current mode
     double near_chord(int u, int v) const;

@@ -6,6 +6,13 @@
 #   phases (default: all, in this order): build prepare truth ours caps curve ablation solvers weighted
 #                                         scale proximity threads poi competitors small
 #   smoke (not in the default list): every tool once on TJpre_1058, a few minutes; run it first
+#   added later, submitted on their own (not in the default list; binaries in cpp/bin2, built by build2, so
+#   the main run's cpp/bin is never rebuilt under its queued jobs):
+#     build2     our tools into cpp/bin2
+#     obstacles  holes in TJ / GI at 500k faces (disks covering 5 / 10 / 20%, six walls with gaps): truth, our
+#                index, MMP vs VTP, EAR-Oracle, DGG
+#     neurogf    NeuroGF (GPU) on the six 500k terrains, TJ at 1M and the obstacle meshes
+#   SMOKE2=1 RG_OUT=results/server/smoke2: obstacles and neurogf on TJpre_1058, a few minutes
 # On one machine the jobs of a phase run JOBS at a time (JOBS_BIG / JOBS_PROX for the big ones), phase after
 # phase. With SLURM=1 every job is submitted as a Slurm job of its own (cores, memory and time from res()
 # below; scripts in $L/slurm), the jobs of later phases waiting for prepare and truth (afterany), and the
@@ -42,7 +49,8 @@ EAR_DIR=${EAR_DIR:-$PWD/external/weighted_distance_oracle}
 CONS=${SLURM_CONSTRAINT-type_d}  # SLURM_CONSTRAINT= (empty) for any node type
 SRC=external/UpdatedStructureTerrainCode/input
 X=cpp/bin/cci_exp
-O=results/server; L=$O/logs; IN=$O/meshes; mkdir -p $O $L $L/slurm $O/truth $IN $O/comp $O/dgg
+X2=cpp/bin2  # the tools of the obstacles and neurogf phases (build2)
+O=${RG_OUT:-results/server}; L=$O/logs; IN=$O/meshes; mkdir -p $O $L $L/slurm $O/truth $IN $O/comp $O/dgg $O/ngf
 TERR="AU GI LH SC TJ VS"
 SIZES="500000 1002528 1503378 2000000 2504322"
 PHASES=${*:-build prepare truth ours caps curve ablation solvers weighted scale proximity threads poi competitors small}
@@ -50,6 +58,18 @@ SOLVER_MEM_GB=${SOLVER_MEM_GB:-150}  # threads phase: budget for the label solve
                                      # MMP ~1.6 KB per face of the sub-mesh: ~1.6 / 3.5 GB per thread at 2.5M faces)
 QS="--sources 200 --per-source 10 --buckets 3 --bucket-sources 100 --near-pairs 2000 --a2a-sources 40 --a2a-per-source 5"
 V="--variants dense,code16,code8 --near-variants sym,sym16,sym8"
+# obstacles and neurogf (SMOKE2=1: the tiny terrain, small query sets, a short NeuroGF training)
+SMOKE2=${SMOKE2:-}
+OT="TJ GI"; OS=500000; OKINDS="blobs05 blobs10 blobs20 walls"; OQS=$QS; EARS="EAR@0.2@5 EAR@0.2@10"; EART=72h
+NGF_DATA="--sources 512 --val 8 --global 4096 --paths 1024"; NGF_THREADS=${NGF_THREADS:-16}; NGF_ARGS=""
+NGF_MESHES=${NGF_MESHES:-}  # default: the six 500k terrains, TJ at 1M and the obstacle meshes (SMOKE2: the obstacle meshes)
+if [ -n "$SMOKE2" ]; then
+  OT="TJ"; OS=1058; OKINDS="blobs10 walls"; EARS="EAR@0.2@5"; EART=1h; NGF_THREADS=4
+  OQS="--sources 20 --per-source 10 --buckets 3 --bucket-sources 10 --near-pairs 200 --a2a-sources 10 --a2a-per-source 5"
+  NGF_DATA="--sources 32 --val 2 --global 512 --paths 128"; NGF_ARGS="--epochs 20 --sdf-epochs 5 --iters 20"
+fi
+NGF_PY=${NGF_PY:-$(dirname "${CONDA_PREFIX:-/nonexistent/rg}")/ngf/bin/python}  # the conda env ngf (hpc_setup_neurogf.sh)
+okind() { case $1 in blobs*) echo "--kind blobs --cover 0.${1#blobs}";; walls) echo "--kind walls --walls 6";; esac; }
 truth() { echo "--truth-cache $O/truth/$1.s200x10"; }  # one cache name per terrain (every set derives from it)
 run() { # name, command...: runs one job; its output in $L/name.log, GNU time in $L/name.time, and one JSON
         # line per job in $L/jobs.jsonl (exit code, wall seconds, peak RSS)
@@ -61,8 +81,8 @@ run() { # name, command...: runs one job; its output in $L/name.log, GNU time in
   printf '{"job":"%s","exit":%d,"wall_s":%s,"max_rss_kb":%s,"end":"%s"}\n' "$name" $rc "${wall:-null}" "${rss:-null}" "$(date -Is)" >> $L/jobs.jsonl
   return $rc
 }
-res() { # Slurm resources of one job, by its name: cores, memory, time limit
-  local n=$1 k=1 c=1 m t
+res() { # Slurm resources of one job, by its name: cores, memory, time limit, GPUs (obst.* as their main-run kind)
+  local n=${1#obst.} k=1 c=1 m t g=0
   case $n in *1002528*) k=2;; *1503378*) k=3;; *2000000*) k=4;; *2504322*) k=5;; esac  # faces / 500k
   case $n in
     prepare.*)             m=8G;            t=4:00:00 ;;
@@ -78,26 +98,31 @@ res() { # Slurm resources of one job, by its name: cores, memory, time limit
     eareval.*|earmesh.*|weights.*) m=4G;    t=1:00:00 ;;
     dgg.*)                 m=$((24 * k))G;  t=2-00:00:00 ;;
     upo.*)                 m=64G;           t=3-00:00:00 ;;
+    make.*|prep.*)         m=8G;            t=2:00:00 ;;
+    ngfdata.*) c=$NGF_THREADS; m=48G;       t=12:00:00 ;;
+    ngf.*)            g=1; m=48G;           t=2-00:00:00 ;;
     *)                     m=$((16 * k))G;  t=3-00:00:00 ;;
   esac
-  echo "$c $m $t"
+  echo "$c $m $t $g"
 }
 BASE_DEP=""  # Slurm: the job ids of this invocation's prepare and truth phases (every later job waits for them)
 submit() { # Slurm: one job per input line (a `run name ...` line), waiting for $BASE_DEP and $DEP; prints the ids
   local line name c m t id ids="" dep=$(echo "$BASE_DEP:${DEP:-}" | sed 's/^:*//; s/:*$//; s/::*/:/g')
   while IFS= read -r line; do
-    name=$(echo "$line" | awk '{print $2}'); read c m t <<< "$(res $name)"
+    name=$(echo "$line" | awk '{print $2}'); read c m t g <<< "$(res $name)"
     # clusters that do not schedule memory (HSE: nodes report 1 MB, CR_CORE): MEM_PER_CORE_GB reserves the
     # memory a job needs by asking for ceil(memory / MEM_PER_CORE_GB) cores (left idle: off by default)
     if [ -n "${MEM_PER_CORE_GB:-}" ]; then local need=$(( (${m%G} + MEM_PER_CORE_GB - 1) / MEM_PER_CORE_GB )); [ $need -gt $c ] && c=$need; fi
     { echo "#!/bin/bash"  # resubmit a job with: sbatch $L/slurm/<job>.sbatch
+      # GPU jobs: --gpus and the GPU node types (default V100: type_a|b|c) instead of CONS
+      local cons=$CONS; [ "$g" -gt 0 ] && cons=${SLURM_GPU_CONSTRAINT-type_a|type_b|type_c}
       for o in "-J $name" "-o $L/slurm/$name.%j.out" "-c $c" ${SLURM_MEM:+"--mem=$m"} "-t $t" ${SLURM_ACCOUNT:+"-A $SLURM_ACCOUNT"} \
-               ${SLURM_PARTITION:+"-p $SLURM_PARTITION"} ${CONS:+"-C $CONS"}; do echo "#SBATCH $o"; done
+               ${SLURM_PARTITION:+"-p $SLURM_PARTITION"} ${cons:+"--constraint=$cons"} $([ "$g" -gt 0 ] && echo "--gpus=$g"); do echo "#SBATCH $o"; done
       echo "cd $PWD"; echo "source ${SLURM_ENV:-scripts/server/hpc_env.sh}"
       echo "SLURM= scripts/server/run_server.sh __job <<'JOB'"; echo "$line"; echo "JOB"; } > $L/slurm/$name.sbatch
     id=$(sbatch --parsable ${dep:+--dependency=afterany:$dep} $L/slurm/$name.sbatch) || {
       echo "sbatch failed: $name" >&2; continue; }
-    id=${id%%;*}; echo "submitted $name: job $id ($c cores, $m, $t)" >&2; ids="$ids:$id"
+    id=${id%%;*}; echo "submitted $name: job $id ($c cores$([ "$g" -gt 0 ] && echo ", $g GPU"), $m, $t)" >&2; ids="$ids:$id"
   done
   echo "${ids#:}"
 }
@@ -112,6 +137,8 @@ __job) # inside a Slurm job: the job lines on stdin, one after another
   xargs -d '\n' -P 1 -I{} bash -c '{}' ;;
 build) # our tools, and the competitors built from source: DGG (our port) and the UP-Oracle static driver
   make -C cpp -B -j8 all dgg bin/upo_static ;;  # -B: cpp/bin holds macOS objects tracked in git
+build2) # the obstacles and neurogf phases' tools, in cpp/bin2 (cpp/bin stays as the main run built it)
+  make -C cpp -B -j8 BIN=bin2 all dgg ;;
 prepare) # one prepared copy of every terrain for every method: folded faces repaired, chart at the origin
   for T in $TERR; do for S in $SIZES; do
     [ -f $IN/${T}pre_$S.off ] || echo "run prepare.${T}_$S python3 scripts/competitors/prepare_mesh.py $SRC/${T}pre_$S.off $IN/${T}pre_$S.off"
@@ -236,6 +263,51 @@ competitors) # their code on the same prepared meshes and the same queries (expo
   for T in $TERR; do for K in 50 500 2500; do
     echo "run upo.$T.$K cpp/bin/upo_static $IN/${T}pre_500000.off $IN/${T}pre_${K}_poi_on_500000.txt 0.1 200 UP,WSPD,RC,EAR --json $O/upo.$T.$K.json"
   done; done | par $JOBS > /dev/null ;;
+obstacles) # obstacles as holes (scripts/competitors/make_obstacles.py: the faces whose centroid lies in an
+           # obstacle are removed; touching holes are separated so the mesh stays a manifold): TJ and GI at 500k
+           # faces, disks covering 5 / 10 / 20% of the area and six walls with gaps. Per mesh: the exact truth and
+           # the competitors' queries, our index (uncapped, cap 64; the random pairs also by detour ratio), MMP
+           # against VTP (two exact algorithms), EAR-Oracle (V2V, A2A) and DGG. Uses cpp/bin2 (build2)
+  ids=$(for T in $OT; do B=${T}pre_$OS; [ -f $IN/$B.off ] || echo "run obst.prep.$T python3 scripts/competitors/prepare_mesh.py $SRC/$B.off $IN/$B.off"; done | par 2)
+  mk=$(for T in $OT; do for K in $OKINDS; do M=${T}pre_$OS.$K
+    echo "run obst.make.$T.$K python3 scripts/competitors/make_obstacles.py $IN/${T}pre_$OS.off $IN/$M.off $(okind $K) --seed 1"; done; done | DEP=$ids par $JOBS)
+  OBST_TRUTH=$(for T in $OT; do for K in $OKINDS; do M=${T}pre_$OS.$K
+    echo "run obst.truth.$T.$K $X2/cci_exp $IN/$M.off --eps 0.2 --gap-factor 1 $OQS --truth-cache $O/truth/$M.s200x10 --export $O/comp/$M --truth-only"
+  done; done | DEP=$mk par $JOBS)
+  for T in $OT; do for K in $OKINDS; do M=${T}pre_$OS.$K; R="$OQS --truth-cache $O/truth/$M.s200x10 --detour-sets $V --refine"
+    echo "run obst.ours.$T.$K.kd $X2/cci_exp $IN/$M.off --eps 0.2 --gap-factor 1 $R --json $O/obst.ours.$T.$K.kd.json"
+    echo "run obst.ours.$T.$K.k64 $X2/cci_exp $IN/$M.off --eps 0.2 --gap-factor 1 --kmax 64 $R --json $O/obst.ours.$T.$K.k64.json"
+  done; done | DEP=$OBST_TRUTH par $JOBS > /dev/null
+  # two exact algorithms on every obstacle mesh (Kirsanov's MMP and VTP must agree: the truth is MMP)
+  for T in $OT; do for K in $OKINDS; do M=${T}pre_$OS.$K
+    echo "run obst.onthefly.$T.$K $X2/solver_check $IN/$M.off 5 --json $O/obst.onthefly.$T.$K.json"; done; done | DEP=$mk par $JOBS > /dev/null
+  em=$(for T in $OT; do for K in $OKINDS; do M=${T}pre_$OS.$K
+    echo "run obst.earmesh.$T.$K bash -c 'cp $IN/$M.off $EAR_DIR/datasets/repaired/$M.off'"; done; done | DEP=$mk par 2)
+  ear=$(for T in $OT; do for K in $OKINDS; do M=${T}pre_$OS.$K
+    for Q in V2V A2A; do echo "run obst.ear.$T.$K.$Q env KIND=$Q timeout $EART scripts/competitors/run_competitors.sh $M $O/comp/$M.$Q.query $EARS"; done
+  done; done | DEP=$em:$OBST_TRUTH par $JOBS_BIG)
+  for T in $OT; do for K in $OKINDS; do M=${T}pre_$OS.$K
+    echo "run obst.eareval.$T.$K.V2V bash -c 'python3 scripts/competitors/harness_eval.py $O/comp/$M.V2V.truth $EAR_DIR/results/${M}_V2V_EAR_*.log --detour $O/comp/$M.V2V.detour --json $O/obst.ear.$M.V2V.json'"
+    echo "run obst.eareval.$T.$K.A2A bash -c 'python3 scripts/competitors/harness_eval.py $O/comp/$M.A2A.truth $EAR_DIR/results/${M}_A2A_EAR_*.log --json $O/obst.ear.$M.A2A.json'"
+  done; done | DEP=$ear par 1 > /dev/null
+  for T in $OT; do for K in $OKINDS; do M=${T}pre_$OS.$K
+    for E in 0.001 0.0001; do echo "run obst.dgg.$T.$K.$E bash -c 'scripts/server/dgg_one.sh $M $E && mv $O/dgg.$M.$E.json $O/obst.dgg.$M.$E.json'"; done
+  done; done | DEP=$OBST_TRUTH par $JOBS_BIG > /dev/null ;;
+neurogf) # NeuroGF (Zhang et al., NeurIPS 2023), the learned baseline, on the queries of the other methods: the six
+         # terrains at 500k faces, TJ at 1M, and the obstacle meshes. Per mesh a CPU job makes the training data
+         # (cpp/bin2/ngf_data: exact MMP distances and paths; the test-pair vertices are excluded), then a GPU job
+         # trains their network with their hyperparameters and scores it (scripts/neurogf/neurogf.py)
+  ML=$NGF_MESHES
+  if [ -z "$ML" ]; then
+    [ -z "$SMOKE2" ] && ML="$(for T in $TERR; do echo -n "${T}pre_500000 "; done)TJpre_1002528"
+    for T in $OT; do for K in $OKINDS; do ML="$ML ${T}pre_$OS.$K"; done; done
+  fi
+  for M in $ML; do
+    mkdir -p $O/ngf/$M
+    dep=""; case $M in *.blobs*|*.walls) dep=${OBST_TRUTH:-};; esac  # obstacle meshes: after their truth (same submission)
+    d=$(echo "run ngfdata.$M $X2/ngf_data $IN/$M.off $O/ngf/$M $NGF_DATA --threads $NGF_THREADS --exclude $O/comp/$M.V2V.pairs" | DEP=$dep par 1)
+    echo "run ngf.$M bash -c '$NGF_PY scripts/neurogf/neurogf.py --mesh $IN/$M.off --data $O/ngf/$M --queries $O/comp/$M --out $O/ngf/$M/run $NGF_ARGS ${NGF_EXTRA:-} && cp $O/ngf/$M/run/neurogf.json $O/neurogf.$M.json'" | DEP=$d par 1 > /dev/null
+  done ;;
 smoke) # every tool and the whole pipeline once on a 1,058-face terrain: results in $O/smoke
   if [ -n "$SLURM" ]; then # the whole phase as one Slurm job
     { echo "#!/bin/bash"

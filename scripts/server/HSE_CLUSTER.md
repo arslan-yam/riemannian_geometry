@@ -94,6 +94,47 @@ fills a node by its core count).
 How long it takes depends on the queue. The longest jobs are the 2.5M-face builds (2–3 days) and EAR-Oracle
 (up to its 72 h timeout).
 
+## 4b. Added later: obstacles and NeuroGF (submitted on their own)
+
+These two phases reuse what the main run already made: the prepared meshes, and for NeuroGF the exported
+queries. They use their own binaries in `cpp/bin2`, so the main run's `cpp/bin` stays as its queued jobs
+expect.
+
+| phase | what | jobs |
+|---|---|---|
+| `obstacles` | holes in TJ and GI at 500k faces (disks covering 5 / 10 / 20%, six walls with gaps): truth, our index (+ detour bands), MMP vs VTP, EAR-Oracle, DGG | 96 CPU jobs |
+| `neurogf` | NeuroGF on the six 500k terrains, TJ at 1M and the 8 obstacle meshes: training data (CPU, 16 threads), then training and scoring on one V100 | 15 CPU + 15 GPU jobs |
+
+Once (login node, ~10 min): the `ngf` environment (PyTorch with CUDA) and `cpp/bin2`.
+
+```bash
+cd ~/rg && git pull && scripts/server/hpc_setup_neurogf.sh 2>&1 | tee setup_ngf.log
+```
+
+It should end with `neurogf setup done`. Then run a smoke test of both phases on the 1,058-face terrain
+(a few minutes once the jobs start; one of them is a GPU job):
+
+```bash
+source scripts/server/hpc_env.sh && SMOKE2=1 RG_OUT=results/server/smoke2 SLURM=1 SLURM_ACCOUNT=<project> scripts/server/run_server.sh obstacles neurogf
+```
+
+When `squeue -u $USER` no longer shows `obst.*` or `ngf*` jobs, check the result:
+
+```bash
+python3 scripts/server/status.py results/server/smoke2
+```
+
+Expect no failures, and `neurogf.*.json` files in `results/server/smoke2`. Then submit both phases:
+
+```bash
+SLURM=1 SLURM_ACCOUNT=<project> scripts/server/run_server.sh obstacles neurogf 2>&1 | tee -a results/server/submit.log
+```
+
+Results:
+- obstacle runs: `obst.ours.*`, `obst.onthefly.*`, `obst.ear.*` and `obst.dgg.*`;
+- NeuroGF: `neurogf.<mesh>.json`, with the errors per set and by detour band, query time on one CPU thread
+  and batched on the GPU, model size, training time and the GPU name.
+
 ## 5. Monitoring
 
 ```bash

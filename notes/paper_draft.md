@@ -124,7 +124,8 @@ Proof sketch:
 
 ### 3.7 Capped portals and certify-or-refine
 
-**Theorem A.** Every answer is $(1+\varepsilon)$-certified or exact. Labels are $O(nk\log n)$. A random
+**Theorem A.** Every answer is $(1+\varepsilon)$-certified or exact. Each cut has at most $k$ box portals plus
+$O(\varepsilon^{-1}\log k)$ tail portals, so labels are $O((k+\varepsilon^{-1}\log k)\,n\log n)$. A random
 pair is refined with probability about $2\pi/(k\varepsilon)^3$; measured: 0 of 1,500 pairs at 10k and
 0 of 200 at 100k.
 
@@ -137,10 +138,14 @@ $1+2\varepsilon$ (**Theorem A2A**, `guarantee.md` §7).
 
 | | kd (Theorem 1) | capped (Theorem A) |
 |---|---|---|
-| labels | $\sim 3\bar\sigma D/g$ per vertex, $\Theta(n^{1.5})$ total | $O(nk\log n)$ |
+| labels | $\sim 3\bar\sigma D/g$ per vertex, $\Theta(n^{1.5})$ total | $O((k+\varepsilon^{-1}\log k)\,n\log n)$ |
 | near tables | $\pi\rho g^2/(\varepsilon\lambda)^2$ per vertex | same |
 | query | $O(\text{depth} + K_C)$ | same, + rare exact refine |
-| build | one sub-mesh sweep per portal, $\Theta(n^{1.5})$ sweep area | same order: the top-level sweeps remain |
+| build | one sub-mesh sweep per portal: $\Theta(n^{1.5})$ sweep area, $\Theta(n^{1.5}\log n)$ time | the cap also bounds the sweeps (at most $k + O(\varepsilon^{-1}\log k)$ per cut instead of $\Theta(\sqrt n)$ at the top): $O((k+\varepsilon^{-1}\log k)\,n\log^2 n)$ |
+
+Build times assume a sweep over $m$ faces costs $O(m\log m)$; a cut at level $\ell$ sweeps sub-meshes of
+$\Theta(n/2^\ell)$ faces, and there are $O(\log n)$ levels. The near-table sweeps add $O(n\,\varepsilon^{-2}\log n)$
+in both versions.
 
 Compare with Djidjev–Sommer's space $O(n\varepsilon^{-3/2}\log^2)$ (theory). We state plainly that
 near-linear space is known in theory; our contribution is the certified, implemented index.
@@ -177,7 +182,7 @@ Competitors, each run with its authors' code:
 | SE-Oracle, EAR-Oracle, K-Algo, Steiner schemes, MMP | EAR authors' harness | with our weighted-endpoint fix |
 | UP-Oracle, WSPD-Oracle, RC-Oracle | UP-Oracle code | |
 | DGG | macOS port | |
-| NeuroGF | their network, trained on our exact data | |
+| NeuroGF | their network and training (`scripts/neurogf/neurogf.py`), trained on exact MMP distances and paths of our terrains | GPU; test-pair vertices excluded from training |
 | exact MMP/VTP on the fly | Kirsanov MMP, VTP | |
 | exact POI table | ours | POI setting only |
 
@@ -243,6 +248,15 @@ Steiner base graph with $m=5$, against EAR on the fixed harness:
 |---|---:|---:|---:|---:|
 | ours | 0.35% | 10.9 s | 2.9 MB | 1.3 µs |
 | EAR, sp 5 | 2.42% | 25.9 s | 166 MB | 1.14 ms |
+
+### 5.5b Obstacles **[server]**
+
+Holes in TJ and GI at 500k faces: disks covering 5/10/20% of the area, and six walls with gaps that force
+detours. Ours (uncapped and cap 64), EAR-Oracle, DGG and NeuroGF answer the same queries. Errors are
+also reported by detour ratio $d/|st|$, in the bands [1, 1.01), [1.01, 1.05), [1.05, 1.2) and ≥ 1.2.
+- **Soundness is unaffected:** `guarantee.md` §8, "Obstacles".
+- **Gunnison10k pilot:** every answer sound; mean error 0.03–0.04%, as without obstacles.
+- **Exact solvers:** MMP and VTP agree on every obstacle mesh (checked per mesh).
 
 ### 5.6 A2A
 

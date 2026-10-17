@@ -1,5 +1,7 @@
 #include "certified.h"
 #include <algorithm>
+#include <cstdlib>
+#include <fstream>
 #include <atomic>
 #include <condition_variable>
 #include <cstdio>
@@ -84,6 +86,15 @@ CertifiedIndex::CertifiedIndex(const Terrain& t, const Options& o) : T(t), opt(o
     if (opt.store != "dense" && opt.store != "code16" && opt.store != "code8") throw std::invalid_argument("store: dense | code16 | code8");
     near_mode_of(opt.near_store); // validates the name
     exact = opt.solver != "steiner";
+    if (opt.exact != "mmp" && opt.exact != "vtp") throw std::invalid_argument("exact: mmp | vtp");
+    if (opt.exact == "vtp") { // the faces around each vertex, for close_fans
+        vf_ptr.assign(T.n + 1, 0);
+        for (unsigned v : T.F) vf_ptr[v + 1]++;
+        for (int i = 0; i < T.n; ++i) vf_ptr[i + 1] += vf_ptr[i];
+        vf_idx.resize(T.F.size());
+        std::vector<int> fill(vf_ptr.begin(), vf_ptr.end() - 1);
+        for (int f = 0; f < T.m; ++f) for (int k = 0; k < 3; ++k) vf_idx[fill[T.F[3 * f + k]]++] = f;
+    }
     if (opt.solver != "steiner" && opt.solver != "mmp" && opt.solver != "vtp" && opt.solver != "hybrid") throw std::invalid_argument("solver: mmp | vtp | hybrid | steiner");
     if (exact && std::any_of(T.w.begin(), T.w.end(), [](double x) { return x != 1.0; }))
         throw std::invalid_argument("weighted terrain: MMP / VTP ignore face weights; use solver steiner");
@@ -413,9 +424,33 @@ void CertifiedIndex::cut_geometry() {
 }
 
 // ---------------------------------------------------------------- labels
-void CertifiedIndex::submesh(const std::vector<int>& faces, const std::vector<double>& X, const double* along,
+void CertifiedIndex::close_fans(std::vector<int>& faces) const {
+    if (opt.exact != "vtp") return;
+    for (int round = 0; round < 50; ++round) {
+        // boundary edges of the selection per vertex: more than two means several fans meet there
+        std::map<std::pair<unsigned, unsigned>, int> cnt;
+        for (int f : faces) for (int k = 0; k < 3; ++k) {
+            unsigned u = T.F[3 * f + k], v = T.F[3 * f + (k + 1) % 3];
+            cnt[{std::min(u, v), std::max(u, v)}]++;
+        }
+        std::map<unsigned, int> nb;
+        for (auto& e : cnt) if (e.second == 1) { nb[e.first.first]++; nb[e.first.second]++; }
+        std::vector<int> add;
+        for (auto& x : nb) if (x.second > 2) add.insert(add.end(), vf_idx.begin() + vf_ptr[x.first], vf_idx.begin() + vf_ptr[x.first + 1]);
+        size_t before = faces.size();
+        faces.insert(faces.end(), add.begin(), add.end());
+        std::sort(faces.begin(), faces.end());
+        faces.erase(std::unique(faces.begin(), faces.end()), faces.end());
+        if (faces.size() == before) return;
+    }
+}
+
+void CertifiedIndex::submesh(const std::vector<int>& faces_in, const std::vector<double>& X, const double* along,
                              std::vector<double>& V2, std::vector<unsigned>& F2, std::vector<int>& used,
                              std::vector<int>& pidx, std::vector<double>& Xu, std::vector<double>* W2) const {
+    std::vector<int> closed;
+    if (opt.exact == "vtp") { closed = faces_in; close_fans(closed); }
+    const std::vector<int>& faces = opt.exact == "vtp" ? closed : faces_in;
     if (W2) W2->clear();
     // local vertices
     used.clear();
@@ -591,11 +626,13 @@ void CertifiedIndex::prepare_cut(const Cut& C, Dijkstra& dij, CutWork& W) const 
     W.nfaces = faces.size();
 }
 
-// VTP on the sub-mesh, or MMP with early stop (also when VTP rejects the sub-mesh)
+// VTP on the sub-mesh, or MMP with early stop (also when VTP rejects the sub-mesh); exact = vtp takes VTP
+// for every cut
 Solver* CertifiedIndex::cut_solver(const CutWork& W, bool& vtp) const {
     if (opt.solver == "steiner") { vtp = false; return make_steiner(W.V2, W.F2, W.W2, opt.steiner_m); }
-    Solver* s = vtp ? make_vtp(W.V2, W.F2) : nullptr;
-    if (!s) { vtp = false; s = make_mmp(W.V2, W.F2, true); }
+    if (opt.exact == "vtp") vtp = true;
+    Solver* s = vtp ? make_vtp(W.V2, W.F2, opt.exact == "vtp") : nullptr;
+    if (!s) { if (opt.exact == "vtp") ++mmp_fallbacks; vtp = false; s = make_mmp(W.V2, W.F2, true); }
     return s;
 }
 
@@ -1185,11 +1222,21 @@ int CertifiedIndex::answering_cut(int s, int t) const {
     return select_cut(s, t, cid, rs, rt) ? cid : -2;
 }
 
-// exact distance of a pair: one early-stopping MMP sweep on the faces meeting bbox(s, t) dilated by
-// ub / (2 lambda) (the ellipse lemma: every path of length <= ub stays inside)
-// the solver of a local sub-mesh: exact MMP with early stop, or the Steiner graph on a weighted terrain
+// exact distance of a pair: one exact sweep (MMP with early stop, or VTP) on the faces meeting bbox(s, t)
+// dilated by ub / (2 lambda) (the ellipse lemma: every path of length <= ub stays inside)
+// the solver of a local sub-mesh: the exact solver, or the Steiner graph on a weighted terrain
 Solver* CertifiedIndex::local_solver(const std::vector<double>& V2, const std::vector<unsigned>& F2, const std::vector<double>& W2) const {
     if (opt.solver == "steiner") return make_steiner(V2, F2, W2, opt.steiner_m);
+    return exact_solver(V2, F2);
+}
+
+// the exact solver of near tables, refines and A2A: MMP with early stop, or (exact = vtp) a full VTP sweep,
+// falling back to MMP, counted, when VTP rejects the sub-mesh
+Solver* CertifiedIndex::exact_solver(const std::vector<double>& V2, const std::vector<unsigned>& F2) const {
+    if (opt.exact == "vtp") {
+        if (Solver* s = make_vtp(V2, F2, true)) return s;
+        ++mmp_fallbacks;
+    }
     return make_mmp(V2, F2, true);
 }
 
@@ -1203,7 +1250,7 @@ double CertifiedIndex::exact_pair(int s, int t, double ub) const {
     double along[2] = {1, 0};
     submesh(faces, {}, along, V2, F2, used, pidx, Xu);
     auto loc = [&](int v) { return (unsigned)(std::lower_bound(used.begin(), used.end(), v) - used.begin()); };
-    std::unique_ptr<Solver> sol(make_mmp(V2, F2, true));
+    std::unique_ptr<Solver> sol(exact_solver(V2, F2));
     double d;
     std::vector<unsigned> tg{loc(t)};
     sol->dist(loc(s), tg, &d);
@@ -1221,13 +1268,13 @@ void CertifiedIndex::exact_from(int s, const std::vector<int>& Tg, double ub, do
     double along[2] = {1, 0};
     submesh(faces, {}, along, V2, F2, used, pidx, Xu);
     auto loc = [&](int v) { return (unsigned)(std::lower_bound(used.begin(), used.end(), v) - used.begin()); };
-    std::unique_ptr<Solver> sol(make_mmp(V2, F2, true));
+    std::unique_ptr<Solver> sol(exact_solver(V2, F2));
     std::vector<unsigned> tg(Tg.size());
     for (size_t i = 0; i < Tg.size(); ++i) tg[i] = loc(Tg[i]);
     sol->dist(loc(s), tg, out);
 }
 
-// exact distance between two surface points: MMP from p (a surface point of its face) stopped at q, on
+// exact distance between two surface points: the exact solver from p (a surface point of its face) to q, on
 // the faces meeting bbox(p, q) dilated by ub / (2 lambda). Without inserted points the sub-mesh keeps
 // the order of `faces`, so a face's local id is its position there
 double CertifiedIndex::exact_points(const APoint& p, const APoint& q, double ub) const {
@@ -1235,6 +1282,7 @@ double CertifiedIndex::exact_points(const APoint& p, const APoint& q, double ub)
     double R = ub / (2.0 * lam) + 1e-6 * T.edge;
     double lo[2] = {std::min(p.x, q.x) - R, std::min(p.y, q.y) - R}, hi[2] = {std::max(p.x, q.x) + R, std::max(p.y, q.y) + R};
     std::vector<int> faces = grid.in_box(lo[0], hi[0], lo[1], hi[1]);
+    close_fans(faces); // before the local ids below (submesh keeps the order of the closed list)
     auto lf = [&](int f) -> int {
         auto it = std::lower_bound(faces.begin(), faces.end(), f);
         return (it != faces.end() && *it == f) ? (int)(it - faces.begin()) : -1;
@@ -1244,11 +1292,15 @@ double CertifiedIndex::exact_points(const APoint& p, const APoint& q, double ub)
     std::vector<double> V2, Xu; std::vector<unsigned> F2; std::vector<int> used, pidx;
     double along[2] = {1, 0};
     submesh(faces, {}, along, V2, F2, used, pidx, Xu);
-    std::unique_ptr<Solver> sol(make_mmp(V2, F2, true));
+    std::unique_ptr<Solver> sol(exact_solver(V2, F2));
     SurfPt a{(unsigned)fp, p.x, p.y, T.z_at(p.f, p.x, p.y)};
     std::vector<SurfPt> b{{(unsigned)fq, q.x, q.y, T.z_at(q.f, q.x, q.y)}};
     double d = NAN;
-    if (!sol->point_dists(a, b, &d)) return NAN;
+    if (!sol->point_dists(a, b, &d)) { // VTP rejected the copy with the points inserted
+        ++mmp_fallbacks;
+        std::unique_ptr<Solver> m(make_mmp(V2, F2, true));
+        if (!m->point_dists(a, b, &d)) return NAN;
+    }
     return d;
 }
 

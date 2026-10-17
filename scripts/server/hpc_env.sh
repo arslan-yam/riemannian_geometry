@@ -7,3 +7,5 @@ eval "$(conda shell.bash hook)"
 conda activate ${RG_ENV:-rg}
 export EAR_DIR=${EAR_DIR:-$PWD/external/weighted_distance_oracle}
 if [ -x "$CONDA_PREFIX/bin/time" ]; then export GTIME=$CONDA_PREFIX/bin/time; fi
+# NeuroGF runs in its own environment (PyTorch with CUDA; scripts/server/hpc_setup_neurogf.sh)
+export NGF_PY=${NGF_PY:-$(dirname "$CONDA_PREFIX")/ngf/bin/python}
