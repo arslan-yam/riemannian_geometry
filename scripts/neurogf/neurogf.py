@@ -9,7 +9,12 @@ data comes from cpp/tools/ngf_data: exact MMP distances and shortest paths, in t
 Changes from their scripts, each forced by the setting (nothing is tuned):
   * Signed distance: a terrain is an open surface, so the SDF head learns the unsigned distance to the
     surface (to a dense surface sample, through a k-d tree). It only enters through the path head's
-    on-surface constraint (cstt_dcp), not through the distances.
+    on-surface constraint (cstt_dcp), not through the distances. The third of the samples drawn uniformly
+    in the box is measured against a 1-in-20 subsample of the surface sample: a nearest-point search far
+    from a terrain sheet visits much of the sample (about 1.5 ms per point against 2M points). This
+    overestimates by at most the subsample's spacing (mean 0.4% relative on our meshes); the points on
+    and near the surface use the full sample. --sdf-far-full measures them against the full sample too (the
+    check that this does not change NeuroGF's accuracy).
   * Data loading: the training arrays are held in memory (their scripts read one .npy per source per
     epoch). The per-epoch sampling is theirs: 256 sources x 256 / 32 / 64 targets, and 128 sources x 32
     global / 32 local paths, then 200 iterations on that batch.
@@ -201,13 +206,14 @@ ap.add_argument("--queries", required=True); ap.add_argument("--out", required=T
 ap.add_argument("--epochs", type=int, default=400); ap.add_argument("--sdf-epochs", type=int, default=100)
 ap.add_argument("--iters", type=int, default=200)
 ap.add_argument("--surface-samples", type=int, default=2_000_000)
-ap.add_argument("--test-scale", type=int, default=1)  # local smoke tests only: divides the sources per epoch
+ap.add_argument("--test-scale", type=int, default=1)
+ap.add_argument("--sdf-far-full", action="store_true")  # the uniform box samples against the full surface sample (slow)  # local smoke tests only: divides the sources per epoch
 a = ap.parse_args()
 os.makedirs(a.out, exist_ok=True)
 dev = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 result = {"tool": "neurogf", "argv": " ".join(sys.argv), "mesh": a.mesh, "device": str(dev),
           "gpu": torch.cuda.get_device_name(0) if dev.type == "cuda" else None, "torch": torch.__version__, "cpus": NCPU,
-          "epochs": a.epochs, "sdf_epochs": a.sdf_epochs, "iters": a.iters, "test_scale": a.test_scale, "complete": False}
+          "epochs": a.epochs, "sdf_epochs": a.sdf_epochs, "iters": a.iters, "test_scale": a.test_scale, "sdf_far_full": a.sdf_far_full, "complete": False}
 def flush():
     json.dump(result, open(os.path.join(a.out, "neurogf.json"), "w"), indent=1)
 
@@ -225,7 +231,8 @@ rng = np.random.default_rng(0)
 fi = rng.choice(len(F), a.surface_samples, p=area / area.sum())
 r1 = np.sqrt(rng.random(a.surface_samples, dtype=np.float32))[:, None]; r2 = rng.random(a.surface_samples, dtype=np.float32)[:, None]
 sp = (P[fi, 0] * (1 - r1) + P[fi, 1] * r1 * (1 - r2) + P[fi, 2] * r1 * r2).astype(np.float32)
-tree = cKDTree(sp)
+tree = cKDTree(sp)                 # the samples on and near the surface
+tree_far = tree if a.sdf_far_full else cKDTree(sp[::20])  # the uniform box samples (see the module comment)
 
 def fetch_train_data_sdf(num_fetch):
     k = num_fetch // 3
@@ -233,7 +240,8 @@ def fetch_train_data_sdf(num_fetch):
     q2 = sp[np.random.choice(len(sp), k, replace=False)]
     q3 = random_jittering(sp[np.random.choice(len(sp), k, replace=False)], 0.03, 0.03)
     q = np.concatenate((q1, q2, q3), axis=0).astype(np.float32)
-    return q, tree.query(q, workers=NCPU)[0].astype(np.float32)
+    d = np.concatenate((tree_far.query(q1, workers=NCPU)[0], tree.query(q[k:], workers=NCPU)[0]))
+    return q, d.astype(np.float32)
 
 ld = lambda f: np.load(os.path.join(a.data, f + ".npy"))
 def nrows(x):  # (..., 7) rows: coordinates and the distance normalised

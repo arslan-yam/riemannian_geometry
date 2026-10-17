@@ -100,6 +100,7 @@ res() { # Slurm resources of one job, by its name: cores, memory, time limit, GP
     upo.*)                 m=64G;           t=3-00:00:00 ;;
     make.*|prep.*)         m=8G;            t=2:00:00 ;;
     ngfdata.*) c=$NGF_THREADS; m=48G;       t=12:00:00 ;;
+    ngf.*.epochs800)  g=1; m=48G;           t=4-00:00:00 ;;
     ngf.*)            g=1; m=48G;           t=2-00:00:00 ;;
     *)                     m=$((16 * k))G;  t=3-00:00:00 ;;
   esac
@@ -307,6 +308,16 @@ neurogf) # NeuroGF (Zhang et al., NeurIPS 2023), the learned baseline, on the qu
     dep=""; case $M in *.blobs*|*.walls) dep=${OBST_TRUTH:-};; esac  # obstacle meshes: after their truth (same submission)
     d=$(echo "run ngfdata.$M $X2/ngf_data $IN/$M.off $O/ngf/$M $NGF_DATA --threads $NGF_THREADS --exclude $O/comp/$M.V2V.pairs" | DEP=$dep par 1)
     echo "run ngf.$M bash -c '$NGF_PY scripts/neurogf/neurogf.py --mesh $IN/$M.off --data $O/ngf/$M --queries $O/comp/$M --out $O/ngf/$M/run $NGF_ARGS ${NGF_EXTRA:-} && cp $O/ngf/$M/run/neurogf.json $O/neurogf.$M.json'" | DEP=$d par 1 > /dev/null
+    # fairness checks on the first mesh (TJ at 500k; SMOKE2: the first smoke mesh), on the same data: the
+    # distance-to-surface targets of the far box samples from the full surface sample as in their code
+    # (exactsdf), and twice the training epochs (epochs800: was NeuroGF converged?)
+    CHECK_M=TJpre_500000; [ -n "$SMOKE2" ] && CHECK_M=${OT%% *}pre_$OS.${OKINDS%% *}
+    if [ "$M" = "$CHECK_M" ]; then
+      EP=$( [ -n "$SMOKE2" ] && echo 40 || echo 800 )
+      { echo "run ngf.$M.exactsdf bash -c '$NGF_PY scripts/neurogf/neurogf.py --mesh $IN/$M.off --data $O/ngf/$M --queries $O/comp/$M --out $O/ngf/$M/run_exactsdf $NGF_ARGS ${NGF_EXTRA:-} --sdf-far-full && cp $O/ngf/$M/run_exactsdf/neurogf.json $O/neurogf.$M.exactsdf.json'"
+        echo "run ngf.$M.epochs800 bash -c '$NGF_PY scripts/neurogf/neurogf.py --mesh $IN/$M.off --data $O/ngf/$M --queries $O/comp/$M --out $O/ngf/$M/run_epochs800 $NGF_ARGS ${NGF_EXTRA:-} --epochs $EP && cp $O/ngf/$M/run_epochs800/neurogf.json $O/neurogf.$M.epochs800.json'"
+      } | DEP=$d par 1 > /dev/null
+    fi
   done ;;
 smoke) # every tool and the whole pipeline once on a 1,058-face terrain: results in $O/smoke
   if [ -n "$SLURM" ]; then # the whole phase as one Slurm job

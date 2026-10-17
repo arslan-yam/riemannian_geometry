@@ -182,7 +182,7 @@ Competitors, each run with its authors' code:
 | SE-Oracle, EAR-Oracle, K-Algo, Steiner schemes, MMP | EAR authors' harness | with our weighted-endpoint fix |
 | UP-Oracle, WSPD-Oracle, RC-Oracle | UP-Oracle code | |
 | DGG | macOS port | |
-| NeuroGF | their network and training (`scripts/neurogf/neurogf.py`), trained on exact MMP distances and paths of our terrains | GPU; test-pair vertices excluded from training |
+| NeuroGF | their network and training (`scripts/neurogf/neurogf.py`), trained on exact MMP distances and paths of our terrains | GPU; test-pair vertices excluded from training; checked on TJ 500k that our adaptations do not hurt it (exact distance-to-surface targets) and that it converged (2× epochs) |
 | exact MMP/VTP on the fly | Kirsanov MMP, VTP | |
 | exact POI table | ours | POI setting only |
 

@@ -103,7 +103,7 @@ expect.
 | phase | what | jobs |
 |---|---|---|
 | `obstacles` | holes in TJ and GI at 500k faces (disks covering 5 / 10 / 20%, six walls with gaps): truth, our index (+ detour bands), MMP vs VTP, EAR-Oracle, DGG | 96 CPU jobs |
-| `neurogf` | NeuroGF on the six 500k terrains, TJ at 1M and the 8 obstacle meshes: training data (CPU, 16 threads), then training and scoring on one V100 | 15 CPU + 15 GPU jobs |
+| `neurogf` | NeuroGF on the six 500k terrains, TJ at 1M and the 8 obstacle meshes: training data (CPU, 16 threads), then training and scoring on one V100; plus two fairness checks on TJ 500k (the exact distance-to-surface targets, and 800 instead of 400 epochs) | 15 CPU + 17 GPU jobs |
 
 Once (login node, ~10 min): the `ngf` environment (PyTorch with CUDA) and `cpp/bin2`.
 
