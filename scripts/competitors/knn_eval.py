@@ -34,6 +34,8 @@ rs = [float(x) for x in a.radius.split(",")]
 out = {"pairs": a.pairs, "queries": len(groups), "objects_per_query": float(np.mean([len(g) for g in groups])), "diag": diag, "methods": []}
 for spec in a.answers:
     name, f = spec.split("=", 1)
+    if not os.path.exists(f) or os.path.getsize(f) == 0:  # that method did not finish (e.g. killed for memory)
+        print(f"{name}: no answers ({f}), skipped"); out.setdefault("missing", []).append(name); continue
     A = np.loadtxt(f).reshape(-1, 2)
     if len(A) != len(P):
         print(f"{name}: {len(A)} answers for {len(P)} pairs, skipped"); continue
