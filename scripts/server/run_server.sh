@@ -13,6 +13,7 @@
 #                index, MMP vs VTP, EAR-Oracle, DGG
 #     neurogf    NeuroGF (GPU) on the six 500k terrains, TJ at 1M and the obstacle meshes
 #     proxpoi    kNN / range queries in UP-Oracle's setting (their POI files), ours against the UP-Oracle family
+#     rerun      19 Oct fixes: EAR-Oracle with the authors' grid, UP-Oracle at eps 0.25, DGG with early exit
 #   SMOKE2=1 RG_OUT=results/server/smoke2: obstacles and neurogf on TJpre_1058, a few minutes
 # On one machine the jobs of a phase run JOBS at a time (JOBS_BIG / JOBS_PROX for the big ones), phase after
 # phase. With SLURM=1 every job is submitted as a Slurm job of its own (cores, memory and time from res()
@@ -61,7 +62,7 @@ QS="--sources 200 --per-source 10 --buckets 3 --bucket-sources 100 --near-pairs 
 V="--variants dense,code16,code8 --near-variants sym,sym16,sym8"
 # obstacles and neurogf (SMOKE2=1: the tiny terrain, small query sets, a short NeuroGF training)
 SMOKE2=${SMOKE2:-}
-OT="TJ GI"; OS=500000; OKINDS="blobs05 blobs10 blobs20 walls"; OQS=$QS; EARS="EAR@0.2@5 EAR@0.2@10"; EART=72h
+OT="TJ GI"; OS=500000; OKINDS="blobs05 blobs10 blobs20 walls"; OQS=$QS; EARS="EAR@0.2@5 EAR@0.2@7"; EART=72h  # sp: their default 5 and the largest they tested (3-7)
 NGF_DATA="--sources 512 --val 8 --global 4096 --paths 1024"; NGF_THREADS=${NGF_THREADS:-16}; NGF_ARGS=""
 NGF_MESHES=${NGF_MESHES:-}  # default: the six 500k terrains, TJ at 1M and the obstacle meshes (SMOKE2: the obstacle meshes)
 if [ -n "$SMOKE2" ]; then
@@ -75,7 +76,27 @@ PTERR=$TERR; PS=500000; PPOIS="50 500 2500"
 [ -n "$SMOKE2" ] && { PTERR="TJ"; PS=1058; PPOIS="50"; }
 ab() { case $1 in /*) echo "$1";; *) echo "$PWD/$1";; esac; }  # absolute path
 okind() { case $1 in blobs*) echo "--kind blobs --cover 0.${1#blobs}";; walls) echo "--kind walls --walls 6";; esac; }
-truth() { echo "--truth-cache $O/truth/$1.s200x10"; }  # one cache name per terrain (every set derives from it)
+truth() { echo "--truth-cache $O/truth/$1.s200x10"; }
+ear_lines() { # EAR-Oracle (authors' harness, settings $EARS): V2V and A2A, and W2V on the weighted terrains (the same
+              # face weights, scored against the Steiner reference): TJ and GI at 500k faces
+  for T in TJ GI; do M=${T}pre_500000
+    for K in V2V A2A; do echo "run ear.$M.$K env KIND=$K timeout $EART scripts/competitors/run_competitors.sh $M $O/comp/$M.$K.query $EARS"; done
+    echo "run ear.$M.W2V env KIND=W2V FACE_WEIGHTS=$IN/$M.w timeout $EART scripts/competitors/run_competitors.sh $M $O/comp/$M.w.V2V.query $EARS"
+  done; }
+ear_eval_lines() { # scoring of the EAR-Oracle logs against the exact (or Steiner reference) truth
+  for T in TJ GI; do M=${T}pre_500000
+    for K in V2V A2A; do echo "run eareval.$M.$K bash -c 'python3 scripts/competitors/harness_eval.py $O/comp/$M.$K.truth $EAR_DIR/results/${M}_${K}_EAR_*.log --json $O/ear.$M.$K.json'"; done
+    echo "run eareval.$M.W2V bash -c 'python3 scripts/competitors/harness_eval.py $O/comp/$M.w.V2V.truth $EAR_DIR/results/${M}_W2V_EAR_*.log --json $O/ear.$M.W2V.json'"
+  done; }
+obst_ear_lines() { # EAR-Oracle on the obstacle meshes, V2V and A2A
+  for T in $OT; do for K in $OKINDS; do M=${T}pre_$OS.$K
+    for Q in V2V A2A; do echo "run obst.ear.$T.$K.$Q env KIND=$Q timeout $EART scripts/competitors/run_competitors.sh $M $O/comp/$M.$Q.query $EARS"; done
+  done; done; }
+obst_ear_eval_lines() {
+  for T in $OT; do for K in $OKINDS; do M=${T}pre_$OS.$K
+    echo "run obst.eareval.$T.$K.V2V bash -c 'python3 scripts/competitors/harness_eval.py $O/comp/$M.V2V.truth $EAR_DIR/results/${M}_V2V_EAR_*.log --detour $O/comp/$M.V2V.detour --json $O/obst.ear.$M.V2V.json'"
+    echo "run obst.eareval.$T.$K.A2A bash -c 'python3 scripts/competitors/harness_eval.py $O/comp/$M.A2A.truth $EAR_DIR/results/${M}_A2A_EAR_*.log --json $O/obst.ear.$M.A2A.json'"
+  done; done; }  # one cache name per terrain (every set derives from it)
 run() { # name, command...: runs one job; its output in $L/name.log, GNU time in $L/name.time, and one JSON
         # line per job in $L/jobs.jsonl (exit code, wall seconds, peak RSS)
   local name=$1; shift
@@ -100,8 +121,9 @@ res() { # Slurm resources of one job, by its name: cores, memory, time limit, GP
     prox.*)          c=16; m=$((64 + 8 * k))G; t=2-00:00:00 ;;
     threads.*)       c=${n#threads.}; m=$((SOLVER_MEM_GB + 40))G; t=2-00:00:00 ;;
     ear.*)                 m=160G;          t=3-02:00:00 ;;
-    eareval.*|earmesh.*|weights.*) m=4G;    t=1:00:00 ;;
-    dgg.*)                 m=$((24 * k))G;  t=2-00:00:00 ;;
+    eareval.*|earmesh.*|weights.*|gf.earmesh) m=4G; t=1:00:00 ;;
+    gf.truth)              m=8G;            t=12:00:00 ;;
+    dgg.*|dgg2.*)          m=$((24 * k))G;  t=2-00:00:00 ;;
     upo.*)                 m=64G;           t=3-00:00:00 ;;
     make.*|prep.*)         m=8G;            t=2:00:00 ;;
     proxpoi.upo.*)         m=64G;           t=3-00:00:00 ;;
@@ -238,26 +260,13 @@ poi) # UP-Oracle's own setting: their POI files, 500k faces; the exact P x P tab
   done; done | par $JOBS > /dev/null ;;
 competitors) # their code on the same prepared meshes and the same queries (exported by the truth phase)
   [ -x $EAR_DIR/bld/main ] || echo "warning: no EAR-Oracle build in $EAR_DIR (EAR_DIR, see the header): its jobs will fail"
-  # 1. EAR-Oracle (authors' harness), V2V and A2A, sp 5 and 10: TJ and GI at 500k faces (> 32 GB, ~10+ h each)
-  for T in TJ GI; do
-    M=${T}pre_500000
-    echo "run ear.$M.V2V env KIND=V2V timeout 72h scripts/competitors/run_competitors.sh $M $O/comp/$M.V2V.query EAR@0.2@5 EAR@0.2@10"
-    echo "run ear.$M.A2A env KIND=A2A timeout 72h scripts/competitors/run_competitors.sh $M $O/comp/$M.A2A.query EAR@0.2@5 EAR@0.2@10"
-  done > $L/ear.lines
-  # 1b. EAR-Oracle on the weighted terrains (W2V, the same face weights; scored against the Steiner reference)
-  for T in TJ GI; do
-    M=${T}pre_500000
-    echo "run ear.$M.W2V env KIND=W2V FACE_WEIGHTS=$IN/$M.w timeout 72h scripts/competitors/run_competitors.sh $M $O/comp/$M.w.V2V.query EAR@0.2@5 EAR@0.2@10"
-  done >> $L/ear.lines
+  # 1. EAR-Oracle (authors' harness): ear_lines (TJ and GI at 500k faces, ~10 h each), then its scoring
+  ear_lines > $L/ear.lines
   # the harness reads its meshes from $EAR_DIR/datasets/repaired: copied once, by a job of its own after prepare
   ids=$(for T in TJ GI; do M=${T}pre_500000
     echo "run earmesh.$M bash -c 'cp $IN/$M.off $EAR_DIR/datasets/repaired/$M.off'"; done | par 2)
   ids=$(DEP=$ids par $JOBS_BIG < $L/ear.lines)
-  # 1c. scoring of the EAR-Oracle logs against the exact (or Steiner reference) truth
-  for T in TJ GI; do M=${T}pre_500000
-    for K in V2V A2A; do echo "run eareval.$M.$K bash -c 'python3 scripts/competitors/harness_eval.py $O/comp/$M.$K.truth $EAR_DIR/results/${M}_${K}_EAR_*.log --json $O/ear.$M.$K.json'"; done
-    echo "run eareval.$M.W2V bash -c 'python3 scripts/competitors/harness_eval.py $O/comp/$M.w.V2V.truth $EAR_DIR/results/${M}_W2V_EAR_*.log --json $O/ear.$M.W2V.json'"
-  done | DEP=$ids par 1 > /dev/null
+  ear_eval_lines | DEP=$ids par 1 > /dev/null
   # 2. DGG (authors' code, our port), eps 1e-3 and 1e-4, first 200 V2V pairs: TJ at every size, GI at 500k
   { for S in $SIZES; do echo "TJ $S"; done; echo "GI 500000"; } | while read T S; do
     for E in 0.001 0.0001; do
@@ -292,13 +301,8 @@ obstacles) # obstacles as holes (scripts/competitors/make_obstacles.py: the face
     echo "run obst.onthefly.$T.$K $X2/solver_check $IN/$M.off 5 --json $O/obst.onthefly.$T.$K.json"; done; done | DEP=$mk par $JOBS > /dev/null
   em=$(for T in $OT; do for K in $OKINDS; do M=${T}pre_$OS.$K
     echo "run obst.earmesh.$T.$K bash -c 'cp $IN/$M.off $EAR_DIR/datasets/repaired/$M.off'"; done; done | DEP=$mk par 2)
-  ear=$(for T in $OT; do for K in $OKINDS; do M=${T}pre_$OS.$K
-    for Q in V2V A2A; do echo "run obst.ear.$T.$K.$Q env KIND=$Q timeout $EART scripts/competitors/run_competitors.sh $M $O/comp/$M.$Q.query $EARS"; done
-  done; done | DEP=$em:$OBST_TRUTH par $JOBS_BIG)
-  for T in $OT; do for K in $OKINDS; do M=${T}pre_$OS.$K
-    echo "run obst.eareval.$T.$K.V2V bash -c 'python3 scripts/competitors/harness_eval.py $O/comp/$M.V2V.truth $EAR_DIR/results/${M}_V2V_EAR_*.log --detour $O/comp/$M.V2V.detour --json $O/obst.ear.$M.V2V.json'"
-    echo "run obst.eareval.$T.$K.A2A bash -c 'python3 scripts/competitors/harness_eval.py $O/comp/$M.A2A.truth $EAR_DIR/results/${M}_A2A_EAR_*.log --json $O/obst.ear.$M.A2A.json'"
-  done; done | DEP=$ear par 1 > /dev/null
+  ear=$(obst_ear_lines | DEP=$em:$OBST_TRUTH par $JOBS_BIG)
+  obst_ear_eval_lines | DEP=$ear par 1 > /dev/null
   for T in $OT; do for K in $OKINDS; do M=${T}pre_$OS.$K
     for E in 0.001 0.0001; do echo "run obst.dgg.$T.$K.$E bash -c 'scripts/server/dgg_one.sh $M $E && mv $O/dgg.$M.$E.json $O/obst.dgg.$M.$E.json'"; done
   done; done | DEP=$OBST_TRUTH par $JOBS_BIG > /dev/null ;;
@@ -341,6 +345,38 @@ proxpoi) # kNN and range queries in UP-Oracle's setting: their POI files (50, 50
     A=""; for N in UP-Oracle WSPD-Oracle RC-Oracle EAR-Oracle; do A="$A $N=$W/upo.$N.txt"; done
     echo "run proxpoi.eval.$T.$P python3 scripts/competitors/knn_eval.py --pairs $O/comp/$X.pairs --mesh $IN/$M.off --answers$A --k 1,10,25 --radius 0.01,0.03,0.1 --json $O/proxpoi.competitors.$T.$P.json" | DEP=$u par 1 > /dev/null
   done; done ;;
+rerun) # 19 Oct fixes, submitted on their own (needs `make -C cpp BIN=bin2 bin2/dgg_bench` first):
+       # 1. EAR-Oracle again, main and obstacle meshes: the authors' grid (256 boxes from 100k faces up; the first
+       #    runs had 16, their small-terrain setting, and every run died in the build) and sp 5 / 7. The logs of
+       #    the failed runs are kept in $EAR_DIR/results/failed_grid16 (moved once).
+       # 2. UP-Oracle at the authors' eps for many POIs (0.25) on 500 and 2500 POIs (the main runs use 0.1).
+       # 3. only with RERUN_DGG=1: DGG again at every size and on the obstacle meshes, with the early-exit
+       #    point-to-point timing next to their full sweep (dgg_bench in cpp/bin2); results dgg2.*.json /
+       #    obst.dgg2.*.json, graphs deleted after each job (DGG_CLEAN=1). Off by default: on the five small
+       #    terrains the early exit is 2.4-2.5x faster with identical answers, which the paper can state instead.
+       # 4. EAR-Oracle on the authors' own GunnisonForest, their default setting (a reproduction check).
+  F=$EAR_DIR/results/failed_grid16
+  if [ ! -d $F ]; then mkdir -p $F; mv $EAR_DIR/results/*pre_500000*_EAR_* $F/ 2> /dev/null; fi
+  ids=$(ear_lines | par $JOBS_BIG); ear_eval_lines | DEP=$ids par 1 > /dev/null
+  ids=$(obst_ear_lines | par $JOBS_BIG); obst_ear_eval_lines | DEP=$ids par 1 > /dev/null
+  for T in $TERR; do for K in 500 2500; do
+    echo "run upo.$T.$K.eps025 cpp/bin/upo_static $IN/${T}pre_500000.off $IN/${T}pre_${K}_poi_on_500000.txt 0.25 200 UP --json $O/upo.$T.$K.eps025.json"
+  done; done | par $JOBS > /dev/null
+  if [ -n "${RERUN_DGG:-}" ]; then
+    { for S in $SIZES; do echo "TJ $S"; done; echo "GI 500000"; } | while read T S; do for E in 0.001 0.0001; do
+      echo "run dgg2.${T}_$S.$E env DGG_BIN=$(ab $X2) DGG_TAG=dgg2 DGG_CLEAN=1 scripts/server/dgg_one.sh ${T}pre_$S $E"
+    done; done | par $JOBS_BIG > /dev/null
+    for T in $OT; do for K in $OKINDS; do M=${T}pre_$OS.$K; for E in 0.001 0.0001; do
+      echo "run obst.dgg2.$T.$K.$E bash -c 'DGG_BIN=$(ab $X2) DGG_TAG=dgg2 DGG_CLEAN=1 scripts/server/dgg_one.sh $M $E && mv $O/dgg2.$M.$E.json $O/obst.dgg2.$M.$E.json'"
+    done; done; done | par $JOBS_BIG > /dev/null
+  fi
+  # 4. reproduction check on the authors' own GunnisonForest (median set, 200k faces): their default EAR setting
+  #    on our V2V queries (exported from the truth cache of the small phase)
+  M=GunnisonForest100k; F=data/terrains/large/$M.off
+  ids=$(echo "run gf.truth $X2/cci_exp $F --eps 0.2 --gap-factor 1 $QS $(truth $M) --export $O/comp/$M --truth-only" | par 1)
+  ids=$(echo "run gf.earmesh bash -c 'cp $F $EAR_DIR/datasets/repaired/$M.off'" | DEP=$ids par 1)
+  ids=$(echo "run ear.$M.V2V env KIND=V2V timeout $EART scripts/competitors/run_competitors.sh $M $O/comp/$M.V2V.query EAR@0.2@5" | DEP=$ids par 1)
+  echo "run eareval.$M.V2V bash -c 'python3 scripts/competitors/harness_eval.py $O/comp/$M.V2V.truth $EAR_DIR/results/${M}_V2V_EAR_*.log --json $O/ear.$M.V2V.json'" | DEP=$ids par 1 > /dev/null ;;
 smoke) # every tool and the whole pipeline once on a 1,058-face terrain: results in $O/smoke
   if [ -n "$SLURM" ]; then # the whole phase as one Slurm job
     { echo "#!/bin/bash"
