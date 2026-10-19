@@ -42,11 +42,13 @@ $(BIN)/proximity: tools/proximity.cpp $(OBJ)/certified.o $(OBJ)/solver_mmp.o $(O
 # DGG baseline (authors' code, ported in ../external/dgg_port; not part of `all`)
 DGG ?= ../external/dgg_port
 DGGSHIM ?= ../external/dgg_shim
-dgg: $(BIN)/dgg_precompute $(BIN)/dgg_bench
+dgg: $(BIN)/dgg_precompute $(BIN)/dgg_bench $(BIN)/dgg_knn
 $(BIN)/dgg_precompute: $(wildcard $(DGG)/DGG_precompute/*.cpp) $(wildcard $(DGG)/ICH/*.cpp)
 	@mkdir -p $(BIN); $(CXX) -O2 -std=c++14 -w -include cfloat -include climits -include cmath -include cstring \
 	  -I$(DGG) -I$(DGG)/ICH -I$(DGG)/DGG_precompute -I$(DGGSHIM) $^ -o $@
 $(BIN)/dgg_bench: tools/dgg_bench.cpp
+	@mkdir -p $(BIN); $(CXX) -O3 -std=c++14 -w -include limits -include cmath -I$(DGG) $< -o $@
+$(BIN)/dgg_knn: tools/dgg_knn.cpp
 	@mkdir -p $(BIN); $(CXX) -O3 -std=c++14 -w -include limits -include cmath -I$(DGG) $< -o $@
 
 clean:

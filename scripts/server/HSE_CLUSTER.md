@@ -105,6 +105,7 @@ expect.
 | `obstacles` | holes in TJ and GI at 500k faces (disks covering 5 / 10 / 20%, six walls with gaps): truth, our index (+ detour bands), MMP vs VTP, EAR-Oracle, DGG | 96 CPU jobs |
 | `neurogf` | NeuroGF on the six 500k terrains, TJ at 1M and the 8 obstacle meshes: training data (CPU, 16 threads), then training and scoring on one V100; plus two fairness checks on TJ 500k (the exact distance-to-surface targets, and 800 instead of 400 epochs) | 15 CPU + 17 GPU jobs |
 | `proxpoi` | kNN and range queries in UP-Oracle's setting: their POI files (50, 500, 2500) on the six 500k terrains. Ours (certified, on an index of the POIs) against the UP-Oracle family answering every query-POI pair; tools in `cpp/bin2` (`make -C cpp BIN=bin2 bin2/proximity bin2/upo_static`) | 54 CPU jobs |
+| `proxdgg` | DGG on the `proxpoi` kNN and range queries: one graph per terrain and ε (10⁻³, 10⁻⁴), then an early-stopping Dijkstra per query for 50, 500 and 2500 POIs; needs `make -C cpp BIN=bin2 bin2/dgg_knn` | 12 CPU jobs |
 | `rerun` | 19 Oct fixes: EAR-Oracle again (the authors' grid of 256 boxes, sp 5 and 7) on the main and obstacle meshes, plus a reproduction check on the authors' GunnisonForest; UP-Oracle at the authors' ε = 0.25 for 500 and 2500 POIs; DGG with the early-exit timing only with `RERUN_DGG=1` | 60 CPU jobs |
 
 Once (login node, ~10 min): the `ngf` environment (PyTorch with CUDA) and `cpp/bin2`.

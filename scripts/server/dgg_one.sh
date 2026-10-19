@@ -21,7 +21,7 @@ python3 - "$ROOT" "$O/$TAG.$M.$E.json" "$G" <<'PY'
 import json, os, re, sys
 d = json.load(open("bench.json"))
 t = open("precompute.time").read()
-m = re.search(r"Elapsed \(wall clock\) time[^:]*: ([0-9:.]+)", t)
+m = re.search(r"Elapsed \(wall clock\) time \([^)]*\): ([0-9:.]+)", t)
 wall = None
 if m:
     wall = 0.0

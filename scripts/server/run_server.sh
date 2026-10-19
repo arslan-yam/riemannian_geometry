@@ -13,6 +13,7 @@
 #                index, MMP vs VTP, EAR-Oracle, DGG
 #     neurogf    NeuroGF (GPU) on the six 500k terrains, TJ at 1M and the obstacle meshes
 #     proxpoi    kNN / range queries in UP-Oracle's setting (their POI files), ours against the UP-Oracle family
+#     proxdgg    DGG on the proxpoi kNN / range workload (early-stopping Dijkstra on its graph)
 #     rerun      19 Oct fixes: EAR-Oracle with the authors' grid, UP-Oracle at eps 0.25, DGG with early exit
 #   SMOKE2=1 RG_OUT=results/server/smoke2: obstacles and neurogf on TJpre_1058, a few minutes
 # On one machine the jobs of a phase run JOBS at a time (JOBS_BIG / JOBS_PROX for the big ones), phase after
@@ -124,6 +125,7 @@ res() { # Slurm resources of one job, by its name: cores, memory, time limit, GP
     eareval.*|earmesh.*|weights.*|gf.earmesh) m=4G; t=1:00:00 ;;
     gf.truth)              m=8G;            t=12:00:00 ;;
     dgg.*|dgg2.*)          m=$((24 * k))G;  t=2-00:00:00 ;;
+    proxdgg.*)             m=24G;           t=3-00:00:00 ;;
     upo.*)                 m=64G;           t=3-00:00:00 ;;
     make.*|prep.*)         m=8G;            t=2:00:00 ;;
     proxpoi.upo.*)         m=64G;           t=3-00:00:00 ;;
@@ -377,6 +379,11 @@ rerun) # 19 Oct fixes, submitted on their own (needs `make -C cpp BIN=bin2 bin2/
   ids=$(echo "run gf.earmesh bash -c 'cp $F $EAR_DIR/datasets/repaired/$M.off'" | DEP=$ids par 1)
   ids=$(echo "run ear.$M.V2V env KIND=V2V timeout $EART scripts/competitors/run_competitors.sh $M $O/comp/$M.V2V.query EAR@0.2@5" | DEP=$ids par 1)
   echo "run eareval.$M.V2V bash -c 'python3 scripts/competitors/harness_eval.py $O/comp/$M.V2V.truth $EAR_DIR/results/${M}_V2V_EAR_*.log --json $O/ear.$M.V2V.json'" | DEP=$ids par 1 > /dev/null ;;
+proxdgg) # DGG on the proxpoi workload (needs `make -C cpp BIN=bin2 bin2/dgg_knn` and the proxpoi exports): per terrain
+         # and eps (1e-3, 1e-4) one graph, then kNN / range for 50, 500 and 2500 POIs by early-stopping Dijkstra
+  for T in $PTERR; do for E in 0.001 0.0001; do
+    echo "run proxdgg.$T.$E env DGG_BIN=$(ab $X2) scripts/server/dgg_knn_one.sh $T $E '$PPOIS'"
+  done; done | par $JOBS_BIG > /dev/null ;;
 smoke) # every tool and the whole pipeline once on a 1,058-face terrain: results in $O/smoke
   if [ -n "$SLURM" ]; then # the whole phase as one Slurm job
     { echo "#!/bin/bash"
