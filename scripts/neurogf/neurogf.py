@@ -14,7 +14,10 @@ Changes from their scripts, each forced by the setting (nothing is tuned):
     from a terrain sheet visits much of the sample (about 1.5 ms per point against 2M points). This
     overestimates by at most the subsample's spacing (mean 0.4% relative on our meshes); the points on
     and near the surface use the full sample. --sdf-far-full measures them against the full sample too (the
-    check that this does not change NeuroGF's accuracy).
+    check that this does not change NeuroGF's accuracy). On a GPU node that check would leave the GPU idle
+    for hours while the CPU searches, so it runs in two jobs: --make-far-pool F (CPU) draws every uniform box
+    sample the training will use, measures it against the full sample and writes F; --far-pool F (GPU)
+    consumes F in order. The box samples are i.i.d., so this is the same training as --sdf-far-full.
   * Data loading: the training arrays are held in memory (their scripts read one .npy per source per
     epoch). The per-epoch sampling is theirs: 256 sources x 256 / 32 / 64 targets, and 128 sources x 32
     global / 32 local paths, then 200 iterations on that batch.
@@ -26,6 +29,8 @@ Coordinates are normalised into [-1, 1]^3 (their SDF sampling assumes it): centr
 divided by half its largest side. Distances are scaled the same way, and predictions are scaled back.
 
 usage: python3 neurogf.py --mesh m.off --data DIR --queries PREFIX --out DIR [--epochs 400] [--sdf-epochs 100]
+                          [--sdf-far-full | --far-pool F]
+       python3 neurogf.py --mesh m.off --make-far-pool F [--epochs 400] [--sdf-epochs 100]   (CPU only, then exits)
        PREFIX: the exported query files (PREFIX.V2V.pairs / .truth / .detour, PREFIX.A2A.query / .truth)
 writes OUT/neurogf.json (rewritten as it goes, "complete" at the end), the checkpoints and the predictions
 """
@@ -201,19 +206,24 @@ def random_jittering(pc, sigma, bound):
 
 # ---------------------------------------------------------------- data
 ap = argparse.ArgumentParser()
-ap.add_argument("--mesh", required=True); ap.add_argument("--data", required=True)
-ap.add_argument("--queries", required=True); ap.add_argument("--out", required=True)
+ap.add_argument("--mesh", required=True); ap.add_argument("--data"); ap.add_argument("--queries"); ap.add_argument("--out")
+ap.add_argument("--make-far-pool"); ap.add_argument("--far-pool")
 ap.add_argument("--epochs", type=int, default=400); ap.add_argument("--sdf-epochs", type=int, default=100)
 ap.add_argument("--iters", type=int, default=200)
 ap.add_argument("--surface-samples", type=int, default=2_000_000)
 ap.add_argument("--test-scale", type=int, default=1)
 ap.add_argument("--sdf-far-full", action="store_true")  # the uniform box samples against the full surface sample (slow)  # local smoke tests only: divides the sources per epoch
 a = ap.parse_args()
-os.makedirs(a.out, exist_ok=True)
+SDF_FETCH_PRE, SDF_FETCH_TRAIN = 90000, 30000      # per epoch, as in their scripts (one third are box samples)
+N_FAR = a.sdf_epochs * (SDF_FETCH_PRE // 3) + a.epochs * (SDF_FETCH_TRAIN // 3)
+if not a.make_far_pool:
+    assert a.data and a.queries and a.out, "--data, --queries and --out are required"
+    os.makedirs(a.out, exist_ok=True)
 dev = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 result = {"tool": "neurogf", "argv": " ".join(sys.argv), "mesh": a.mesh, "device": str(dev),
           "gpu": torch.cuda.get_device_name(0) if dev.type == "cuda" else None, "torch": torch.__version__, "cpus": NCPU,
-          "epochs": a.epochs, "sdf_epochs": a.sdf_epochs, "iters": a.iters, "test_scale": a.test_scale, "sdf_far_full": a.sdf_far_full, "complete": False}
+          "epochs": a.epochs, "sdf_epochs": a.sdf_epochs, "iters": a.iters, "test_scale": a.test_scale,
+          "sdf_far_full": bool(a.sdf_far_full or a.far_pool), "far_pool": a.far_pool, "complete": False}
 def flush():
     json.dump(result, open(os.path.join(a.out, "neurogf.json"), "w"), indent=1)
 
@@ -232,15 +242,30 @@ fi = rng.choice(len(F), a.surface_samples, p=area / area.sum())
 r1 = np.sqrt(rng.random(a.surface_samples, dtype=np.float32))[:, None]; r2 = rng.random(a.surface_samples, dtype=np.float32)[:, None]
 sp = (P[fi, 0] * (1 - r1) + P[fi, 1] * r1 * (1 - r2) + P[fi, 2] * r1 * r2).astype(np.float32)
 tree = cKDTree(sp)                 # the samples on and near the surface
+if a.make_far_pool:   # every box sample of the run, against the full surface sample; then exit (no GPU used)
+    t0 = time.time()
+    q1 = ((np.random.default_rng(1).random((N_FAR, 3)) - 0.5) * 2 * 1.01).astype(np.float32)
+    d1 = np.concatenate([tree.query(q1[i:i + 200000], workers=NCPU)[0] for i in range(0, N_FAR, 200000)])
+    np.savez(a.make_far_pool, q=q1, d=d1.astype(np.float32), surface_samples=a.surface_samples)
+    print(f"far pool: {N_FAR} box samples in {time.time() - t0:.0f} s on {NCPU} threads -> {a.make_far_pool}", flush=True)
+    sys.exit(0)
+far_pool = None
+if a.far_pool:
+    z = np.load(a.far_pool)
+    assert int(z["surface_samples"]) == a.surface_samples and len(z["q"]) >= N_FAR, "far pool does not match this run"
+    far_pool = [z["q"], z["d"], 0]
 tree_far = tree if a.sdf_far_full else cKDTree(sp[::20])  # the uniform box samples (see the module comment)
 
 def fetch_train_data_sdf(num_fetch):
     k = num_fetch // 3
-    q1 = ((np.random.rand(k, 3) - 0.5) * 2 * 1.01).astype(np.float32)
+    if far_pool is not None:   # the next k precomputed box samples (exact, full surface sample)
+        i = far_pool[2]; q1, d1 = far_pool[0][i:i + k], far_pool[1][i:i + k]; far_pool[2] = i + k
+    else:
+        q1 = ((np.random.rand(k, 3) - 0.5) * 2 * 1.01).astype(np.float32)
     q2 = sp[np.random.choice(len(sp), k, replace=False)]
     q3 = random_jittering(sp[np.random.choice(len(sp), k, replace=False)], 0.03, 0.03)
     q = np.concatenate((q1, q2, q3), axis=0).astype(np.float32)
-    d = np.concatenate((tree_far.query(q1, workers=NCPU)[0], tree.query(q[k:], workers=NCPU)[0]))
+    d = np.concatenate((d1 if far_pool is not None else tree_far.query(q1, workers=NCPU)[0], tree.query(q[k:], workers=NCPU)[0]))
     return q, d.astype(np.float32)
 
 ld = lambda f: np.load(os.path.join(a.data, f + ".npy"))
@@ -287,7 +312,7 @@ prep_s = 0.0
 for epc in range(1, a.sdf_epochs + 1):
     sdist_querier.train()
     tp = time.time()
-    q, gt = fetch_train_data_sdf(90000); q, gt = T(q), T(gt)
+    q, gt = fetch_train_data_sdf(SDF_FETCH_PRE); q, gt = T(q), T(gt)
     prep_s += time.time() - tp
     for _ in range(a.iters):
         optimizer.zero_grad()
@@ -324,7 +349,7 @@ prep_s = 0.0
 for epc in range(1, a.epochs + 1):
     net.train()
     tp = time.time()
-    sdf_q, sdist_gt = fetch_train_data_sdf(30000)
+    sdf_q, sdist_gt = fetch_train_data_sdf(SDF_FETCH_TRAIN)
     gq_g, gq_l1, gq_l2, gd_g, gd_l1, gd_l2 = fetch_train_data_gdf(256 // a.test_scale, 256, 32, 64)
     pg_uni, pl_uni = fetch_train_data_spf(128 // a.test_scale, 32, 32)
     spath_gt_g = np.concatenate((pg_uni, np.flip(pg_uni, axis=1)), axis=0)

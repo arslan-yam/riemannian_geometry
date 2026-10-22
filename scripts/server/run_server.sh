@@ -130,7 +130,7 @@ res() { # Slurm resources of one job, by its name: cores, memory, time limit, GP
     make.*|prep.*)         m=8G;            t=2:00:00 ;;
     proxpoi.upo.*)         m=64G;           t=3-00:00:00 ;;
     proxpoi.eval.*)        m=8G;            t=2:00:00 ;;
-    ngfdata.*) c=$NGF_THREADS; m=48G;       t=12:00:00 ;;
+    ngfdata.*|ngfpool.*) c=$NGF_THREADS; m=48G; t=12:00:00 ;;
     ngf.*.epochs800)  g=1; m=48G;           t=4-00:00:00 ;;
     ngf.*)            g=1; m=48G;           t=2-00:00:00 ;;
     *)                     m=$((16 * k))G;  t=3-00:00:00 ;;
@@ -333,6 +333,12 @@ neurogf) # NeuroGF (Zhang et al., NeurIPS 2023), the learned baseline, on the qu
       } | DEP=$d par 1 > /dev/null
     fi
   done ;;
+ngfexact) # the exactsdf fairness check alone, in two jobs (the first submission's single GPU job was cancelled for
+          # an idle GPU: the exact box-sample targets are k-d tree searches on the CPU). A CPU job measures every box
+          # sample of the run against the full surface sample, then the GPU job trains on them; reuses ngf/$M's data
+  M=${NGF_CHECK_MESH:-TJpre_500000}
+  p=$(echo "run ngfpool.$M $NGF_PY scripts/neurogf/neurogf.py --mesh $IN/$M.off --make-far-pool $O/ngf/$M/far_pool.npz $NGF_ARGS" | par 1)
+  echo "run ngf.$M.exactsdf bash -c '$NGF_PY scripts/neurogf/neurogf.py --mesh $IN/$M.off --data $O/ngf/$M --queries $O/comp/$M --out $O/ngf/$M/run_exactsdf $NGF_ARGS ${NGF_EXTRA:-} --far-pool $O/ngf/$M/far_pool.npz && cp $O/ngf/$M/run_exactsdf/neurogf.json $O/neurogf.$M.exactsdf.json'" | DEP=$p par 1 > /dev/null ;;
 proxpoi) # kNN and range queries in UP-Oracle's setting: their POI files (50, 500, 2500 POIs) on the six terrains at
          # 500k faces, 20 query POIs each, k = 1, 10, 25 and radii of 1, 3 and 10% of the chart diagonal. Ours: certified
          # kNN / range on an index of the POIs (cpp/bin2/proximity; exact and approximate modes, against exact search
