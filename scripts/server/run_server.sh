@@ -122,6 +122,7 @@ res() { # Slurm resources of one job, by its name: cores, memory, time limit, GP
     prox.*)          c=16; m=$((64 + 8 * k))G; t=2-00:00:00 ;;
     threads.*)       c=${n#threads.}; m=$((SOLVER_MEM_GB + 40))G; t=2-00:00:00 ;;
     ear.*)                 m=160G;          t=3-02:00:00 ;;
+    ear5.*|ear7.*)   c=${EARFIX_CORES:-8}; m=$((16 * ${EARFIX_CORES:-8}))G; t=3-02:00:00 ;;  # earfix: fewer co-tenants
     eareval.*|earmesh.*|weights.*|gf.earmesh) m=4G; t=1:00:00 ;;
     gf.truth)              m=8G;            t=12:00:00 ;;
     dgg.*|dgg2.*)          m=$((24 * k))G;  t=2-00:00:00 ;;
@@ -333,6 +334,29 @@ neurogf) # NeuroGF (Zhang et al., NeurIPS 2023), the learned baseline, on the qu
       } | DEP=$d par 1 > /dev/null
     fi
   done ;;
+earfix) # EAR-Oracle again, one setting per job, with memory reserved through cores. In the first submission (1 core,
+        # no memory request: the cluster rejects --mem) most EAR runs were killed at 138-147 GB by the other jobs on
+        # their node, while TJ V2V at sp-num 7 finished all queries at a 468 GB peak. Their default sp-num 5 (the
+        # setting of their paper) on the six main sets and one obstacle set per terrain; EARFIX_SP7=1 adds sp-num 7.
+        # EARFIX_CORES (default 8) cores each, one of which computes: ~12.5% load, above the cluster's 10% idle
+        # rule (support would not exempt jobs below it), and fewer jobs sharing the node's memory. Memory is
+        # still not scheduled, so a run can be killed if the node's other jobs use much of it. Their index keeps the box-boundary-to-Steiner-point distances of every leaf box in a
+        # std::map<pair<int,int>,float>, both directions (quad.h, distancePreprocessing): ~64 B per entry and
+        # 2 x boxes x boundary points x Steiner points per box entries, linear in sp-num. sp-num 7 peaked at 468 GB
+        # on TJ 500k, so sp-num 5 should need ~5/7 of that (~335 GB).
+  SPS="5"; [ -n "${EARFIX_SP7:-}" ] && SPS="5 7"
+  ids=$(for SP in $SPS; do for T in TJ GI; do M=${T}pre_500000
+      for K in V2V A2A; do
+        [ "$SP$T$K" = 7TJV2V ] && continue   # finished in the first submission
+        echo "run ear$SP.$M.$K env KIND=$K timeout $EART scripts/competitors/run_competitors.sh $M $O/comp/$M.$K.query EAR@0.2@$SP"; done
+      echo "run ear$SP.$M.W2V env KIND=W2V FACE_WEIGHTS=$IN/$M.w timeout $EART scripts/competitors/run_competitors.sh $M $O/comp/$M.w.V2V.query EAR@0.2@$SP"
+      M=${T}pre_$OS.blobs10
+      echo "run obst.ear$SP.$T.blobs10.V2V env KIND=V2V timeout $EART scripts/competitors/run_competitors.sh $M $O/comp/$M.V2V.query EAR@0.2@$SP"
+    done; done | par 1)
+  { ear_eval_lines | sed 's/^run eareval\./run eareval2./'
+    for T in $OT; do M=${T}pre_$OS.blobs10
+      echo "run obst.eareval2.$T.blobs10.V2V bash -c 'python3 scripts/competitors/harness_eval.py $O/comp/$M.V2V.truth $EAR_DIR/results/${M}_V2V_EAR_*.log --detour $O/comp/$M.V2V.detour --json $O/obst.ear.$M.V2V.json'"
+    done; } | DEP=$ids par 1 > /dev/null ;;
 ngfexact) # the exactsdf fairness check alone, in two jobs (the first submission's single GPU job was cancelled for
           # an idle GPU: the exact box-sample targets are k-d tree searches on the CPU). A CPU job measures every box
           # sample of the run against the full surface sample, then the GPU job trains on them; reuses ngf/$M's data
