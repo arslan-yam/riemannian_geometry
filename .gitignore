@@ -245,3 +245,5 @@ results/dgg/*.off
 results/dgg/dist_*.txt
 rgeo/**/_c*.so
 cpp/bin_dev/
+# cluster results, copied with rsync (scripts/server/HSE_CLUSTER.md): kept locally, not in git
+results/server/
