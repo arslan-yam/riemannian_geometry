@@ -31,7 +31,6 @@ namespace geodesic {
 		// simple functions
 		void initialize_propagation_data();
 		void create_pseudo_source_windows(vertex_pointer &v, bool UpdateFIFOQueue);
-		void erase_from_queue(vertex_pointer v);
 
 		// propagate a windows list (Rule 1)
 		void find_separating_point(list_pointer &list); // find the separating point of the windows and the list
@@ -40,14 +39,26 @@ namespace geodesic {
 		// pairwise windows checking (Rule 2)
 		void check_with_vertices(list_pointer &list);
 		windows_state check_between_two_windows(interval_pointer &w1, interval_pointer &w2); // Check two neighbouring crossing windows on same edge
-		void pairwise_windows_checking(list_pointer &list); // Check crossing windows on same edge
+		void pairwise_windows_checking(list_pointer &list); // Check crossing windows on same edge (not applied: see propagate_one_windows_list)
 
 		// main operation
 		void propagate_one_windows_list(list_pointer &list);
 
 		// member variables
 		//std::multiset<vertex_pointer, Vertex> m_vertex_queue; // priority queue for vertices
-		std::set<vertex_pointer, Vertex> m_vertex_queue;
+		// ordered by distance, ties by vertex id. Was std::set<vertex_pointer, Vertex>, by distance alone: two vertices
+		// at the same distance were one key, so the second insert was dropped and erase/find could remove the other
+		// vertex. A dropped vertex was never popped; a saddle or boundary one never became a pseudo-source, and the
+		// distances behind it came out too long (frequent on terrains with integer coordinates)
+		struct QueueOrder
+		{
+			bool operator()(vertex_pointer x, vertex_pointer y) const
+			{
+				if (x->geodesic_distance() != y->geodesic_distance()) return x->geodesic_distance() < y->geodesic_distance();
+				return x->id() < y->id();
+			}
+		};
+		std::set<vertex_pointer, QueueOrder> m_vertex_queue;
 		std::queue<list_pointer> m_list_queue;                // FIFO queue for lists
 		MemoryAllocator<Interval> m_memory_allocator;		  // quickly allocate and deallocate intervals 
 
@@ -66,15 +77,6 @@ namespace geodesic {
 
 		// initialize windows around source
 		create_pseudo_source_windows(source, false);
-	}
-
-	inline void GeodesicAlgorithmExact::erase_from_queue(vertex_pointer v)
-	{
-		assert(m_vertex_queue.count(v) <= 1);
-
-		std::multiset<vertex_pointer, Vertex>::iterator it = m_vertex_queue.find(v);
-		if (it != m_vertex_queue.end())
-			m_vertex_queue.erase(it);
 	}
 
 	inline void GeodesicAlgorithmExact::create_pseudo_source_windows(vertex_pointer &pseudo_source, bool inside_traversed_area)
@@ -198,9 +200,12 @@ namespace geodesic {
 		// update top_vertex and M_VERTEX_QUEUE
 		if (top_t.geodesic_distance() < Tri.top_vertex->geodesic_distance())
 		{
-			if (Tri.top_vertex->state() == Vertex::FRONT) erase_from_queue(Tri.top_vertex);
+			// out of the queue before its key (the distance) changes, whatever its state: an INSIDE vertex can be queued
+			// too (create_pseudo_source_windows re-queues an improved neighbour) and stays queued. Was: erase / insert
+			// for FRONT vertices only, so a queued INSIDE vertex changed its key inside the set
+			bool queued = m_vertex_queue.erase(Tri.top_vertex) > 0;
 			memcpy(Tri.top_vertex, &top_t, sizeof(Vertex));
-			if (Tri.top_vertex->state() == Vertex::FRONT) m_vertex_queue.insert(Tri.top_vertex);
+			if (queued || Tri.top_vertex->state() == Vertex::FRONT) m_vertex_queue.insert(Tri.top_vertex);
 
 			if ((Tri.top_vertex->state() == Vertex::INSIDE) && (Tri.top_vertex->saddle_or_boundary()))
 				create_pseudo_source_windows(Tri.top_vertex, true); // handle saddle vertex
@@ -631,9 +636,12 @@ namespace geodesic {
 
 		if (list->edge()->adjacent_faces().size() > 1)
 		{
-			// Rule 2: pairwise windows checking
+			// Rule 2: pairwise windows checking. Only the check against the edge's vertices is applied: the pairwise check
+			// (pairwise_windows_checking) drops or cuts a window where its paths cross another window's, but that is a real
+			// crossing only inside the face below the edge, which it does not check (cases 1-4) or checks for the inner
+			// crossing only (cases 5, 6). It made distances too long (up to 8e-6 relative on TJ); with the crossings
+			// checked it was slower than no pairwise check at all
 			check_with_vertices(list);
-			pairwise_windows_checking(list);
 
 			// Rule 1: "One Angle Two Sides"
 			find_separating_point(list);

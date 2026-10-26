@@ -17,7 +17,7 @@ $(BIN)/upo_static: tools/upo_static.cpp
 
 $(OBJ)/solver_mmp.o: src/solver_mmp.cpp src/solver.h
 	@mkdir -p $(OBJ); $(CXX) $(CXXFLAGS) -std=c++14 $(KIR) -c $< -o $@
-$(OBJ)/solver_vtp.o: src/solver_vtp.cpp src/solver.h
+$(OBJ)/solver_vtp.o: src/solver_vtp.cpp src/solver.h $(wildcard third_party/vtp/*.h)
 	@mkdir -p $(OBJ); $(CXX) $(CXXFLAGS) -std=c++14 $(VTPI) -c $< -o $@
 $(BIN)/solver_check: tools/solver_check.cpp $(OBJ)/solver_mmp.o $(OBJ)/solver_vtp.o $(OBJ)/solver_steiner.o src/mesh_io.h
 	$(CXX) $(CXXFLAGS) $< $(OBJ)/solver_mmp.o $(OBJ)/solver_vtp.o $(OBJ)/solver_steiner.o -o $@

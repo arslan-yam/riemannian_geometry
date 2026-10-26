@@ -1,4 +1,5 @@
-// VTP lives in its own namespace: its headers reuse Kirsanov's class names in namespace geodesic
+// VTP lives in its own namespace: its headers reuse Kirsanov's class names in namespace geodesic.
+// third_party/vtp carries two fixes to the upstream code (vertex queue ties, the pairwise window check): notes/vtp_exactness.md
 #define geodesic vtpgeo
 #define sscanf_s sscanf  // MSVC-only name in the OBJ reader, which is not used here
 #include "stdafx.h"
