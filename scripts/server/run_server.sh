@@ -122,6 +122,10 @@ res() { # Slurm resources of one job, by its name: cores, memory, time limit, GP
     prox.*)          c=16; m=$((64 + 8 * k))G; t=2-00:00:00 ;;
     threads.*)       c=${n#threads.}; m=$((SOLVER_MEM_GB + 40))G; t=2-00:00:00 ;;
     ear.*)                 m=160G;          t=3-02:00:00 ;;
+    big.make)              m=16G;           t=4:00:00 ;;
+    big.truth)             m=64G;           t=3-00:00:00 ;;
+    big.ours)        c=${BIG_THREADS:-32}; m=200G; t=3-00:00:00 ;;
+    big.dgg|big.onthefly)  m=64G;           t=1-00:00:00 ;;
     ear5.*|ear7.*)   c=${EARFIX_CORES:-8}; m=$((16 * ${EARFIX_CORES:-8}))G; t=3-02:00:00 ;;  # earfix: fewer co-tenants
     eareval.*|earmesh.*|weights.*|gf.earmesh) m=4G; t=1:00:00 ;;
     gf.truth)              m=8G;            t=12:00:00 ;;
@@ -334,6 +338,33 @@ neurogf) # NeuroGF (Zhang et al., NeurIPS 2023), the learned baseline, on the qu
       } | DEP=$d par 1 > /dev/null
     fi
   done ;;
+rerun) # after the VTP fix (notes/vtp_exactness.md): every run of our index again, with exact labels. The old results move
+       # to $O/pre_vtpfix/ (kept for the before/after comparison). Not rerun: the truth (MMP), the competitors, the
+       # weighted runs (Steiner labels). Jobs longer than the time to the next maintenance are requeued by Slurm.
+  A=$O/pre_vtpfix; mkdir -p $A
+  for f in $O/ours.*.json $O/caps.*.json $O/curve.*.json $O/ablation.*.json $O/solvers.*.json $O/scale.*.json \
+           $O/threads.*.json $O/poi.*.json $O/prox.*.json $O/small.*.json $O/obst.ours.*.json $O/proxpoi.ours.*.json \
+           $O/big.ours.*.json; do [ -f "$f" ] && mv "$f" $A/; done
+  THREAD_COUNTS="${RERUN_THREADS:-8 16 32}" "$0" ours caps curve ablation solvers scale threads poi proximity small
+  for T in $OT; do for K in $OKINDS; do M=${T}pre_$OS.$K; R="$OQS --truth-cache $O/truth/$M.s200x10 --detour-sets $V --refine"
+    echo "run obst.ours.$T.$K.kd $X2/cci_exp $IN/$M.off --eps 0.2 --gap-factor 1 $R --json $O/obst.ours.$T.$K.kd.json"
+    echo "run obst.ours.$T.$K.k64 $X2/cci_exp $IN/$M.off --eps 0.2 --gap-factor 1 --kmax 64 $R --json $O/obst.ours.$T.$K.k64.json"
+  done; done | par $JOBS > /dev/null
+  for T in $PTERR; do for P in $PPOIS; do
+    M=${T}pre_$PS; PF=$(ab $SRC/${T}pre_${P}_poi_on_$PS.txt); X=proxpoi.$T.$P
+    echo "run proxpoi.ours.$T.$P $X2/proximity $IN/$M.off --poi-file $PF --queries-from-objects --poi-index --queries 20 --k 1,10,25 --radius 0.01,0.03,0.1 --eps 0.2 --gap-factor 1 --store code8 --truth-cache $O/truth/$X --json $O/proxpoi.ours.$T.$P.json"
+  done; done | par 1 > /dev/null
+  [ -n "${RERUN_BIG:-1}" ] && [ "${RERUN_BIG:-1}" != 0 ] && "$0" big ;;
+big) # one size beyond the UP-Oracle terrains: TJ resampled to 5M faces (scripts/competitors/refine_grid.py: a 1584 x 1584
+     # grid on the surface of the 2.5M-face TJ, the way their resolutions relate to each other), cap 64, built on
+     # BIG_THREADS (32) threads; the exact truth (MMP) of the usual query sets, one VTP/MMP sweep per query on the fly,
+     # and DGG (eps 1e-4). BIG_SOLVER=mmp builds with MMP sweeps only. Tools from cpp/bin2.
+  M=TJref_5011778; F=$IN/$M.off
+  mk=$(echo "run big.make bash -c 'python3 scripts/competitors/refine_grid.py $IN/TJpre_2504322.off $IN/$M.raw.off --side 1584 && python3 scripts/competitors/prepare_mesh.py $IN/$M.raw.off $F && rm $IN/$M.raw.off'" | par 1)
+  echo "run big.onthefly $X2/solver_check $F 5 --json $O/big.onthefly.$M.json" | DEP=$mk par 1 > /dev/null
+  tr=$(echo "run big.truth $X2/cci_exp $F --eps 0.2 --gap-factor 1 $QS $(truth $M) --export $O/comp/$M --truth-only" | DEP=$mk par 1)
+  echo "run big.ours $X2/cci_exp $F --eps 0.2 --gap-factor 1 --kmax 64 ${BIG_SOLVER:+--solver $BIG_SOLVER} $QS $(truth $M) $V --refine --threads ${BIG_THREADS:-32} --solver-mem-gb 150 --json $O/big.ours.$M.k64.json" | DEP=$tr par 1 > /dev/null
+  echo "run big.dgg env DGG_BIN=$(ab $X2) DGG_CLEAN=1 scripts/server/dgg_one.sh $M 0.0001" | DEP=$tr par 1 > /dev/null ;;
 earfix) # EAR-Oracle again, one setting per job, with memory reserved through cores. In the first submission (1 core,
         # no memory request: the cluster rejects --mem) most EAR runs were killed at 138-147 GB by the other jobs on
         # their node, while TJ V2V at sp-num 7 finished all queries at a 468 GB peak. Their default sp-num 5 (the
