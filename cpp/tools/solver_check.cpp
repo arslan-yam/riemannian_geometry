@@ -1,3 +1,5 @@
+#include <map>
+#include <cstdlib>
 // exactness and speed of the exact solvers: MMP full sweep, MMP stopped at the targets, VTP full sweep
 #include <algorithm>
 #include <chrono>
@@ -40,6 +42,21 @@ int main(int argc, char** argv) {
             maxdiff_early = std::max(maxdiff_early, std::fabs(a[i] - b[i]));
             maxdiff_vtp = std::max(maxdiff_vtp, std::fabs(a[i] - c[i]));
             if (a[i] > 0) maxrel = std::max(maxrel, std::fabs(a[i] - c[i]) / a[i]);
+        }
+        if (std::getenv("CCI_WORST")) {  // debug: where MMP and VTP disagree (MMP = a, VTP = c)
+            std::vector<int> bd(n, 0);  // boundary vertices: on an edge used by one face
+            std::map<std::pair<unsigned, unsigned>, int> ec;
+            for (size_t f = 0; f + 2 < F.size(); f += 3)
+                for (int e = 0; e < 3; ++e) { unsigned u = F[f + e], v = F[f + (e + 1) % 3]; ec[{std::min(u, v), std::max(u, v)}]++; }
+            for (auto& [e, k] : ec) if (k == 1) bd[e.first] = bd[e.second] = 1;
+            unsigned worst = 0, cnt = 0, mmp_longer = 0, on_bd = 0; double wr = 0;
+            for (unsigned i = 0; i < n; ++i) {
+                double r = a[i] > 0 ? std::fabs(a[i] - c[i]) / a[i] : 0;
+                if (r > 1e-4) { ++cnt; mmp_longer += a[i] > c[i]; on_bd += bd[i]; }
+                if (r > wr) { wr = r; worst = i; }
+            }
+            std::fprintf(stderr, "source %u: %u vertices differ > 1e-4 (MMP longer at %u, on the boundary %u); worst %u: MMP %.6f VTP %.6f rel %.3g boundary %d\n",
+                         s, cnt, mmp_longer, on_bd, worst, a[worst], c[worst], wr, bd[worst]);
         }
         std::vector<std::pair<double, unsigned>> d2(n);
         for (unsigned i = 0; i < n; ++i) {
