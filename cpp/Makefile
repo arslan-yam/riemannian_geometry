@@ -39,6 +39,10 @@ $(BIN)/cci_exp: tools/cci_exp.cpp $(OBJ)/certified.o $(OBJ)/solver_mmp.o $(OBJ)/
 $(BIN)/proximity: tools/proximity.cpp $(OBJ)/certified.o $(OBJ)/solver_mmp.o $(OBJ)/solver_vtp.o $(OBJ)/solver_steiner.o src/mesh_io.h
 	$(CXX) $(CXXFLAGS) $< $(OBJ)/certified.o $(OBJ)/solver_mmp.o $(OBJ)/solver_vtp.o $(OBJ)/solver_steiner.o -o $@
 
+# SEP baseline (our reimplementation of Gotsman and Hormann 2022; not part of `all`)
+$(BIN)/sep_bench: tools/sep_bench.cpp $(OBJ)/solver_mmp.o $(OBJ)/solver_vtp.o $(OBJ)/solver_steiner.o src/mesh_io.h src/terrain.h
+	$(CXX) $(CXXFLAGS) $< $(OBJ)/solver_mmp.o $(OBJ)/solver_vtp.o $(OBJ)/solver_steiner.o -o $@
+
 # DGG baseline (authors' code, ported in ../external/dgg_port; not part of `all`)
 DGG ?= ../external/dgg_port
 DGGSHIM ?= ../external/dgg_shim

@@ -76,19 +76,28 @@ an index provides. More
 importantly, a returned distance comes with no indication of its error.
 
 Road networks faced the same problem and solved it with labelling indexes. H2H~\cite{ouyang2018hierarchy}
-takes a tree decomposition of the graph and lets every vertex store its distances to the separator vertices
-of its ancestors, so that a query is a minimum over one separator. We ask whether the same architecture works
-on a continuous surface, and what it takes to keep it exact or certified. Two things change. A separator of
-a surface is a curve, not a finite set of vertices, so the index can only store distances to finitely many
-sampled points of it. And labels must be geodesic distances on the surface, which are expensive to compute
-for every vertex and portal pair.
+and hierarchical cut labelling~\cite{farhan2023hierarchical} let every vertex store its distances to the
+separator vertices of its ancestors, so that a query is a minimum over one separator. The same layout is
+behind Thorup's approximate oracles for planar graphs~\cite{thorup2004compact}, which keep distances to
+$O(1/\eps)$ portals on shortest-path separators, and it has been carried to weighted polyhedral surfaces
+through Steiner graphs~\cite{aleksandrov2010algorithms,djidjev2011approximate} and to mesh geodesics with
+compressed distance functions~\cite{gotsman2022compressing}. These indexes return a single value. On a
+terrain that value either rests on a discretised surface or comes with no bound that the query can check.
 
-We propose the Certified Cut Index (\cci). Its separators are axis-parallel cut lines of a kd
-hierarchy~\cite{bentley1975multidimensional} over the chart of the terrain. Every vertex stores exact geodesic
-distances to portals sampled on the cuts of its ancestors, at an arc gap $g$ near the region and at
-geometrically growing gaps away from it. For a query, the minimum over one cut gives an upper bound that
-is the length of an actual path, and the 1-Lipschitz structure of the label rows along the cut gives a
-lower bound. Both are within a factor $1\pm\eps$ of the true distance, so every answer carries a certificate.
+We propose the Certified Cut Index (\cci). We keep the label layout and the minimum over one cut, and change
+three things. First, the separators are straight axis-parallel cut lines of a kd
+hierarchy~\cite{bentley1975multidimensional} over the chart of the terrain, not shortest paths. The portal
+argument of Thorup's oracles needs a shortest-path separator, so we replace it with a window lemma that bounds
+where a shortest path can cross a cut and what crossing far away costs; portals are then sampled at an arc
+gap $g$ near the region and at geometrically growing gaps away from it. Second, every label is an exact
+geodesic distance on the continuous surface, computed on a small sub-mesh, rather than a graph, Steiner-graph
+or fitted value. Third, a straight cut makes the label rows 1-Lipschitz in arc length along the cut, and this
+gives a lower bound next to the upper bound, so each query returns an interval $\LB\le d\le\UB$ that is
+certified against the exact surface distance and is within a factor $1\pm\eps$ of it. Any oracle whose answer
+$\hat d$ is a path length with a guarantee $\hat d\le(1+\eps)d$ implies the interval $[\hat d/(1+\eps),\hat d]$,
+but only if the guarantee is against the exact distance, and its width is always $\eps$. Ours adapts to the
+query: at $\eps=0.2$ its median width is 0.35\%. The interval is what lets the index decide kNN and range
+queries exactly and refine exactly only the pairs it cannot certify.
 Our contributions are as follows:
 (i) the Certified Cut Index and its $(1+\eps)$ guarantee, built on a window lemma that bounds where a
 shortest path can cross a cut, an ellipse lemma that makes labels computable exactly on small sub-meshes,
@@ -122,11 +131,15 @@ with well-separated node pairs, answering POI-to-POI queries with a $(1+\eps)$ g
 Steiner graph. EAR-Oracle~\cite{huang2023ear} extends this to arbitrary points with highway nodes on an
 adaptive grid, and adds an additive error for points between Steiner points. RC-Oracle~\cite{yan2024rc}
 targets point clouds and UP-Oracle~\cite{yan2025up} terrains that change, both for a set of POIs. All of
-them measure their distance on a discretised surface. Kaul et al.~\cite{kaul2015new} derived lower and upper
-bounds for terrain distances with a fixed ratio of about $1/0.9$, computed per pair by a graph search, and
-used them to prune kNN candidates; K-Algo~\cite{kaul2013finding} computes exact paths by a search that
-refines a Steiner graph on the fly. Our bounds are read from an index in a microsecond and their ratio is
-controlled by $\eps$.
+them measure their distance on a discretised surface, and they return a single value with no lower bound.
+EAR-Oracle is the closest in structure: it partitions the chart by a uniform grid and stores, for the vertices
+on box boundaries, approximate distances to the Steiner points inside the box, and answers a query by Dijkstra
+on these highway nodes. It has one level, approximate labels and an additive error term. Per-query lower and
+upper bounds on terrain distances are not new: Kaul et al.~\cite{kaul2013finding,kaul2015new} derive both,
+with a fixed ratio of about 0.9, by a search per pair, and earlier surface kNN
+methods~\cite{deng2006surface,shahabi2008indexing} filter candidates with Euclidean lower bounds and network
+upper bounds before an exact refinement. We follow the same filter-and-refine pattern, but our bounds are read
+from an index in a microsecond and their ratio is controlled by $\eps$.
 
 \paragraph{Oracles on polyhedral surfaces with theory.}
 Aleksandrov et al.~\cite{aleksandrov2005determining,aleksandrov2010algorithms} and Djidjev and
@@ -137,7 +150,23 @@ $O(n\eps^{-3/2}\log^2\frac{n}{\eps}\log^2\frac{1}{\eps})$, and query time
 $O(\eps^{-1}\log\frac1\eps + \log\log n)$. Near-linear space is therefore known in theory, and our
 uncapped index is asymptotically larger. As far as we know, neither line of work has an implementation,
 their constants include the Steiner density and the smallest face angle, and neither returns a per-query
-interval.
+interval. Our geometric portal spacing is a relative of their geometrically placed Steiner points, applied
+along a cut instead of around vertices. In polygonal domains with obstacles, Thorup~\cite{thorup2007compact}
+and van der Laan et al.~\cite{vanderlaan2026approximate} use the same recursion with shortest-path separators
+of the free space and $O(1/\eps)$ anchor points per vertex and separator.
+
+\paragraph{Precomputed geodesics in geometry processing.}
+The closest work to ours is SEP by Gotsman and Hormann~\cite{gotsman2022compressing}. It bisects a mesh
+recursively with separator curves, stores for every vertex its distances to the curves of its ancestors,
+restricted to each ancestor's patch, and answers a query by minimising over the shared curves; its conclusion
+suggests axis-parallel cuts as an alternative. Its distances are low-degree polynomial fits, the separators
+are sampled on a fixed grid, and pairs in the same leaf use the Euclidean distance. Its error bound holds only
+if every fit is accurate everywhere, which the method does not enforce, and it reports mean errors of
+0.1--0.4\% on meshes of up to 5k vertices. Because its distances are restricted to patches, every ancestor curve
+has to be scanned; our labels are distances on the whole surface, so the deepest separating cut suffices.
+Landmark methods store distances to a few sample points: Xin et al.~\cite{xin2012constant} interpolate them
+in constant time without a bound, and Burghard and Klein~\cite{burghard2015simple} return the triangle-inequality
+lower and upper bounds through the landmarks, whose relative width is not bounded.
 
 \paragraph{Distance labels and portals on graphs.}
 Planar graphs have small separators~\cite{lipton1979separator}, and the approximate oracles of
@@ -146,13 +175,19 @@ al.~\cite{kawarabayashi2011linear} store distances to portals on shortest-path s
 $\eps$-covers keep $O(1/\eps)$ portals per vertex and separator. Exact distance labels on planar graphs need
 $\Theta(\sqrt n)$ entries per vertex in the worst case~\cite{gavoille2004distance}, which is the graph analogue
 of our $n^{1.5}$ total. On road networks, hub labels~\cite{abraham2011hub}, pruned landmark
-labelling~\cite{akiba2013fast} and H2H~\cite{ouyang2018hierarchy} answer exact queries in microseconds. \cci
-transfers H2H's architecture to a continuous surface: cut lines instead of vertex separators, sampled portals
-instead of whole bags, exact geodesic labels, and a certified interval instead of an exact minimum.
+labelling~\cite{akiba2013fast}, H2H~\cite{ouyang2018hierarchy} and hierarchical cut
+labelling~\cite{farhan2023hierarchical} answer exact queries in microseconds; the last two store, for every
+vertex, distances to the vertices of its ancestor separators or cuts. ALT~\cite{goldberg2005computing} derives
+lower bounds from the triangle inequality through landmarks to guide a search. \cci transfers the layout of
+H2H to a continuous surface: cut lines instead of vertex separators, sampled portals instead of whole bags,
+exact geodesic labels, and a certified interval instead of an exact minimum. Its lower bound does not go
+through a landmark; it uses that a shortest path must cross the cut, and that the labels change by at most the
+arc length between neighbouring portals.
 
 \paragraph{Learned distances.}
 NeuroGF~\cite{zhang2023neurogf} fits a neural field to one mesh and answers a query with one forward
-pass. It has no error bound, and its fixed capacity has to cover the whole surface.
+pass, and GeGnn~\cite{pang2023learning} learns a geodesic embedding with a graph neural network. Neither has an
+error bound, and a fixed capacity has to cover the whole surface.
 
 \section{Preliminaries}
 \label{sec:prelim}
