@@ -16,10 +16,18 @@ Warning--empty publisher in abraham2011hub
 Warning--empty address in abraham2011hub
 Warning--empty publisher in akiba2013fast
 Warning--empty address in akiba2013fast
+Warning--empty publisher in burghard2015simple
+Warning--empty address in burghard2015simple
 Warning--empty publisher in chen1990shortest
 Warning--empty address in chen1990shortest
+Warning--empty publisher in deng2006surface
+Warning--empty address in deng2006surface
 Warning--empty publisher in djidjev2011approximate
 Warning--empty address in djidjev2011approximate
+Warning--empty publisher in goldberg2005computing
+Warning--empty address in goldberg2005computing
+Warning--empty publisher in gotsman2022compressing
+Warning--empty address in gotsman2022compressing
 Warning--page numbers missing in both pages and numpages fields in huang2023ear
 Warning--empty publisher in kawarabayashi2011linear
 Warning--empty address in kawarabayashi2011linear
@@ -27,52 +35,56 @@ Warning--empty publisher in klein2002preprocessing
 Warning--empty address in klein2002preprocessing
 Warning--empty publisher in ouyang2018hierarchy
 Warning--empty address in ouyang2018hierarchy
+Warning--empty publisher in thorup2007compact
+Warning--empty address in thorup2007compact
 Warning--empty publisher in wei2017distance
 Warning--empty address in wei2017distance
+Warning--empty publisher in xin2012constant
+Warning--empty address in xin2012constant
 Warning--page numbers missing in both pages and numpages fields in yan2024rc
 Warning--page numbers missing in both pages and numpages fields in yan2025up
 Warning--empty publisher in zhang2023neurogf
 Warning--empty address in zhang2023neurogf
 Warning--page numbers missing in both pages and numpages fields in zhang2023neurogf
-You've used 28 entries,
+You've used 38 entries,
             6273 wiz_defined-function locations,
-            1676 strings with 23257 characters,
-and the built_in function-call counts, 34367 in all, are:
-= -- 4802
-> -- 962
+            1732 strings with 25086 characters,
+and the built_in function-call counts, 46325 in all, are:
+= -- 6303
+> -- 1290
 < -- 0
-+ -- 327
-- -- 327
-* -- 2311
-:= -- 3103
-add.period$ -- 139
-call.type$ -- 28
-change.case$ -- 201
-chr.to.int$ -- 28
-cite$ -- 50
-duplicate$ -- 3053
-empty$ -- 2149
-format.name$ -- 427
-if$ -- 8756
++ -- 436
+- -- 442
+* -- 3090
+:= -- 4196
+add.period$ -- 189
+call.type$ -- 38
+change.case$ -- 270
+chr.to.int$ -- 38
+cite$ -- 72
+duplicate$ -- 4189
+empty$ -- 2940
+format.name$ -- 578
+if$ -- 11721
 int.to.chr$ -- 2
 int.to.str$ -- 1
-missing$ -- 121
-newline$ -- 254
-num.names$ -- 196
-pop$ -- 1175
+missing$ -- 163
+newline$ -- 328
+num.names$ -- 266
+pop$ -- 1634
 preamble$ -- 1
-purify$ -- 425
+purify$ -- 574
 quote$ -- 0
-skip$ -- 1086
+skip$ -- 1516
 stack$ -- 0
-substring$ -- 2768
-swap$ -- 329
+substring$ -- 3728
+swap$ -- 449
 text.length$ -- 0
 text.prefix$ -- 0
 top$ -- 0
-type$ -- 574
-warning$ -- 22
-while$ -- 192
+type$ -- 832
+warning$ -- 34
+while$ -- 263
 width$ -- 0
-write$ -- 558
-(There were 22 warnings)
+write$ -- 742
+(There were 34 warnings)

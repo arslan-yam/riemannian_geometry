@@ -2,7 +2,7 @@
 %%% Do NOT edit. File created by BibTeX with style
 %%% ACM-Reference-Format-Journals [18-Jan-2012].
 
-\begin{thebibliography}{28}
+\begin{thebibliography}{38}
 
 %%% ====================================================================
 %%% NOTE TO THE USER: you can override these defaults by providing
@@ -109,6 +109,17 @@
 \newblock
 
 
+\bibitem[Burghard and Klein(2015)]%
+        {burghard2015simple}
+\bibfield{author}{\bibinfo{person}{Oliver Burghard} {and}
+  \bibinfo{person}{Reinhard Klein}.} \bibinfo{year}{2015}\natexlab{}.
+\newblock \showarticletitle{Simple, Robust, Constant-Time Bounds on Surface
+  Geodesic Distances using Point Landmarks}. In
+  \bibinfo{booktitle}{\emph{Vision, Modeling and Visualization (VMV)}}.
+  \bibinfo{pages}{17--24}.
+\newblock
+
+
 \bibitem[Chen and Han(1990)]%
         {chen1990shortest}
 \bibfield{author}{\bibinfo{person}{Jindong Chen} {and} \bibinfo{person}{Yijie
@@ -132,6 +143,17 @@
 \newblock
 
 
+\bibitem[Deng et~al\mbox{.}(2006)]%
+        {deng2006surface}
+\bibfield{author}{\bibinfo{person}{Ke Deng}, \bibinfo{person}{Xiaofang Zhou},
+  \bibinfo{person}{Heng~Tao Shen}, \bibinfo{person}{Kai Xu}, {and}
+  \bibinfo{person}{Xuemin Lin}.} \bibinfo{year}{2006}\natexlab{}.
+\newblock \showarticletitle{Surface k-{NN} Query Processing}. In
+  \bibinfo{booktitle}{\emph{Proceedings of the 22nd International Conference on
+  Data Engineering (ICDE)}}. \bibinfo{pages}{78}.
+\newblock
+
+
 \bibitem[Djidjev and Sommer(2011)]%
         {djidjev2011approximate}
 \bibfield{author}{\bibinfo{person}{Hristo~N. Djidjev} {and}
@@ -143,6 +165,19 @@
 \newblock
 
 
+\bibitem[Farhan et~al\mbox{.}(2023)]%
+        {farhan2023hierarchical}
+\bibfield{author}{\bibinfo{person}{Muhammad Farhan}, \bibinfo{person}{Henning
+  Koehler}, \bibinfo{person}{Robert Ohsaka}, {and} \bibinfo{person}{Qing
+  Wang}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Hierarchical Cut Labelling -- Scaling Up Distance
+  Queries on Road Networks}.
+\newblock \bibinfo{journal}{\emph{Proceedings of the ACM on Management of
+  Data}} \bibinfo{volume}{1}, \bibinfo{number}{4} (\bibinfo{year}{2023}),
+  \bibinfo{pages}{244:1--244:25}.
+\newblock
+
+
 \bibitem[Gavoille et~al\mbox{.}(2004)]%
         {gavoille2004distance}
 \bibfield{author}{\bibinfo{person}{Cyril Gavoille}, \bibinfo{person}{David
@@ -151,6 +186,27 @@
 \newblock \showarticletitle{Distance Labeling in Graphs}.
 \newblock \bibinfo{journal}{\emph{Journal of Algorithms}} \bibinfo{volume}{53},
   \bibinfo{number}{1} (\bibinfo{year}{2004}), \bibinfo{pages}{85--112}.
+\newblock
+
+
+\bibitem[Goldberg and Harrelson(2005)]%
+        {goldberg2005computing}
+\bibfield{author}{\bibinfo{person}{Andrew~V. Goldberg} {and}
+  \bibinfo{person}{Chris Harrelson}.} \bibinfo{year}{2005}\natexlab{}.
+\newblock \showarticletitle{Computing the Shortest Path: {A*} Search Meets
+  Graph Theory}. In \bibinfo{booktitle}{\emph{Proceedings of the 16th ACM-SIAM
+  Symposium on Discrete Algorithms (SODA)}}. \bibinfo{pages}{156--165}.
+\newblock
+
+
+\bibitem[Gotsman and Hormann(2022)]%
+        {gotsman2022compressing}
+\bibfield{author}{\bibinfo{person}{Craig Gotsman} {and} \bibinfo{person}{Kai
+  Hormann}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{Compressing Geodesic Information for Fast
+  Point-to-Point Geodesic Distance Queries}. In
+  \bibinfo{booktitle}{\emph{SIGGRAPH Asia 2022 Conference Papers}}.
+  \bibinfo{pages}{4:1--4:9}.
 \newblock
 
 
@@ -260,6 +316,19 @@
 \newblock
 
 
+\bibitem[Pang et~al\mbox{.}(2023)]%
+        {pang2023learning}
+\bibfield{author}{\bibinfo{person}{Bo Pang}, \bibinfo{person}{Zhongtian Zheng},
+  \bibinfo{person}{Guoping Wang}, {and} \bibinfo{person}{Peng-Shuai Wang}.}
+  \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Learning the Geodesic Embedding with Graph Neural
+  Networks}.
+\newblock \bibinfo{journal}{\emph{ACM Transactions on Graphics}}
+  \bibinfo{volume}{42}, \bibinfo{number}{6} (\bibinfo{year}{2023}),
+  \bibinfo{pages}{191:1--191:12}.
+\newblock
+
+
 \bibitem[Qin et~al\mbox{.}(2016)]%
         {qin2016fast}
 \bibfield{author}{\bibinfo{person}{Yipeng Qin}, \bibinfo{person}{Xiaoguang
@@ -270,6 +339,18 @@
 \newblock \bibinfo{journal}{\emph{ACM Transactions on Graphics}}
   \bibinfo{volume}{35}, \bibinfo{number}{4} (\bibinfo{year}{2016}),
   \bibinfo{pages}{125:1--125:13}.
+\newblock
+
+
+\bibitem[Shahabi et~al\mbox{.}(2008)]%
+        {shahabi2008indexing}
+\bibfield{author}{\bibinfo{person}{Cyrus Shahabi}, \bibinfo{person}{Lu-An
+  Tang}, {and} \bibinfo{person}{Songhua Xing}.}
+  \bibinfo{year}{2008}\natexlab{}.
+\newblock \showarticletitle{Indexing Land Surface for Efficient k{NN} Query}.
+\newblock \bibinfo{journal}{\emph{Proceedings of the VLDB Endowment}}
+  \bibinfo{volume}{1}, \bibinfo{number}{1} (\bibinfo{year}{2008}),
+  \bibinfo{pages}{1020--1031}.
 \newblock
 
 
@@ -297,6 +378,28 @@
 \newblock
 
 
+\bibitem[Thorup(2007)]%
+        {thorup2007compact}
+\bibfield{author}{\bibinfo{person}{Mikkel Thorup}.}
+  \bibinfo{year}{2007}\natexlab{}.
+\newblock \showarticletitle{Compact Oracles for Approximate Distances Around
+  Obstacles in the Plane}. In \bibinfo{booktitle}{\emph{Proceedings of the 15th
+  European Symposium on Algorithms (ESA)}} \emph{(\bibinfo{series}{LNCS},
+  Vol.~\bibinfo{volume}{4698})}. \bibinfo{pages}{383--394}.
+\newblock
+
+
+\bibitem[van~der Laan et~al\mbox{.}(2026)]%
+        {vanderlaan2026approximate}
+\bibfield{author}{\bibinfo{person}{Jacobus van~der Laan},
+  \bibinfo{person}{Frank Staals}, {and} \bibinfo{person}{Lorenzo Theunissen}.}
+  \bibinfo{year}{2026}\natexlab{}.
+\newblock \bibinfo{title}{Approximate Dynamic Nearest Neighbor Searching in a
+  Polygonal Domain}.
+\newblock \bibinfo{howpublished}{arXiv:2603.11775}.
+\newblock
+
+
 \bibitem[Wei et~al\mbox{.}(2017)]%
         {wei2017distance}
 \bibfield{author}{\bibinfo{person}{Victor~Junqiu Wei}, \bibinfo{person}{Raymond
@@ -317,6 +420,17 @@
 \newblock \bibinfo{journal}{\emph{ACM Transactions on Graphics}}
   \bibinfo{volume}{28}, \bibinfo{number}{4} (\bibinfo{year}{2009}),
   \bibinfo{pages}{104:1--104:8}.
+\newblock
+
+
+\bibitem[Xin et~al\mbox{.}(2012)]%
+        {xin2012constant}
+\bibfield{author}{\bibinfo{person}{Shi-Qing Xin}, \bibinfo{person}{Xiang Ying},
+  {and} \bibinfo{person}{Ying He}.} \bibinfo{year}{2012}\natexlab{}.
+\newblock \showarticletitle{Constant-Time All-Pairs Geodesic Distance Query on
+  Triangle Meshes}. In \bibinfo{booktitle}{\emph{Proceedings of the ACM
+  SIGGRAPH Symposium on Interactive 3D Graphics and Games (I3D)}}.
+  \bibinfo{pages}{31--38}.
 \newblock
 
 
