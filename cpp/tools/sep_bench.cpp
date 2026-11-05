@@ -662,9 +662,18 @@ int main(int argc, char** argv) {
       std::printf("curves: mean grid %.1f, max grid %d, longest %.3g (scale %.3g)\n", (double)gs / std::max<size_t>(1, S.curves.size()), gm, lm, S.scale); }
     if (qp.empty()) return 0;
     std::vector<double> est(qp.size()); int same = 0;
-    auto tq = Clock::now();
-    for (size_t k = 0; k < qp.size(); ++k) est[k] = query(S, qp[k].first, qp[k].second);
-    double q_us = 1e6 * secs(tq) / qp.size();
+    // the first pass also brings the index back into cache (and, on a laptop, out of compressed memory);
+    // we report the best of three timed passes after it, and the first pass separately
+    double q_first = 0, q_us = 1e300;
+    for (int rep = 0; rep < 4; ++rep) {
+        if (rep == 1) q_curves = q_evals = q_levels = 0;
+        auto tq = Clock::now();
+        for (size_t k = 0; k < qp.size(); ++k) est[k] = query(S, qp[k].first, qp[k].second);
+        double us = 1e6 * secs(tq) / qp.size();
+        if (rep == 0) q_first = us; else q_us = std::min(q_us, us);
+    }
+    q_curves /= 3; q_evals /= 3; q_levels /= 3;
+    std::printf("query time: first pass %.2f us, best of 3 after it %.2f us\n", q_first, q_us);
     std::printf("query work per pair: %.1f levels, %.1f curves evaluated, %.0f grid points\n", (double)q_levels / qp.size(), (double)q_curves / qp.size(), (double)q_evals / qp.size());
     std::vector<double> ae; double esum = 0, emax = -1e300, emin = 1e300;
     for (size_t k = 0; k < qp.size(); ++k) {
@@ -708,7 +717,7 @@ int main(int argc, char** argv) {
           << ",\"nodes\":" << S.nodes.size() << ",\"leaves\":" << leaves << ",\"curves\":" << S.curves.size() << ",\"depth_avg\":" << sumd / T.n << ",\"depth_max\":" << maxd
           << ",\"sweeps\":" << S.sweeps << ",\"build_s\":" << t_build << ",\"tree_s\":" << S.t_tree << ",\"sweep_s\":" << S.t_sweep << ",\"fit_s\":" << S.t_fit << ",\"leaf_s\":" << t_leaf
           << ",\"doubles_per_vertex\":" << doubles / T.n << ",\"index_bytes\":" << (long long)bytes
-          << ",\"queries\":" << m << ",\"same_leaf\":" << same << ",\"query_us\":" << q_us
+          << ",\"queries\":" << m << ",\"same_leaf\":" << same << ",\"query_us\":" << q_us << ",\"query_us_first\":" << q_first
           << ",\"err_mean\":" << am << ",\"err_p99\":" << ae[(size_t)(0.99 * (m - 1))] << ",\"err_max\":" << ae.back()
           << ",\"err_mean_signed\":" << esum / m << ",\"err_max_signed\":" << emax << ",\"err_min_signed\":" << emin << "}\n";
     }
