@@ -18,6 +18,7 @@
 \newcommand{\dist}{\operatorname{dist}}
 \newcommand{\pending}[1]{\textcolor{gray}{[#1]}}
 
+\newtheorem*{headline}{Theorem}
 \begin{document}
 
 \title{Certified Distance Queries on Terrain Surfaces in Microseconds}
@@ -27,23 +28,23 @@
 
 \begin{abstract}
 Shortest-path distances on terrain surfaces underlie nearest-neighbour, range and route queries in
-geographic information systems, robotics and military planning. Exact geodesic algorithms take
-milliseconds to seconds per pair, and the distance oracles proposed for terrains approximate the surface
-by a Steiner graph, so their error is fixed by the discretisation, their indexes are large, and no
-answer says how wrong it can be. We present the Certified Cut Index (\cci), a distance oracle for terrain
-surfaces built like a hub labelling on a separator hierarchy. Every vertex stores exact geodesic
-distances to portals sampled on the cut lines of a kd hierarchy, and every query returns an estimate
-together with a certified interval $\LB \le d \le \UB$ with $(1-\eps)d \le \LB$ and $\UB \le (1+\eps)d$.
-A window lemma lets us sample the cuts instead of storing them whole, an ellipse lemma makes every label an
-exact geodesic computed on a small sub-mesh, and the 1-Lipschitz structure of the label rows gives the
-lower bound. A capped variant with certify-or-refine stores $O\big((k+\eps^{-1}\log k)\,n\log n\big)$
-labels and still answers every query with a certificate or exactly. On the six terrains of the UP-Oracle
-paper with 0.5M faces, \cci answers vertex-to-vertex queries in 0.5--1.5\,$\mu$s on one core with a mean
-error of 0.001--0.03\% in 0.36--2\,GB, while EAR-Oracle needs 333\,GB and 0.4--1\,s per query for a mean
-error of 2.6--2.9\%, and DGG, the most accurate competitor, 0.3--0.8\,s per query. Up to 5M faces the
-capped index grows like $n^{1.14}$ and keeps its 0.3\,$\mu$s queries and 0.02\% error. All 6.8 million answers
-we checked are certified and correct. The same index answers queries between arbitrary surface points,
-certified kNN and range queries, weighted terrains and terrains with obstacles.
+geographic information systems, robotics and planning. Exact geodesic algorithms take seconds per pair on large
+terrains, and the distance oracles proposed for terrains answer faster but approximately, without saying how wrong a
+given answer is. We present the Certified Cut Index (\cci), a terrain distance oracle whose every answer is a
+certified interval: a query returns an estimate together with $\LB\le d\le\UB$, where $d$ is the exact surface
+distance, $(1-\eps)d\le\LB$ and $\UB\le(1+\eps)d$. The interval adapts to the query, with a median width of 0.36\%
+at $\eps=0.2$, and it makes the oracle a database operator: kNN and range queries are decided from the intervals,
+and only the candidates the intervals cannot separate are computed exactly. Every vertex stores exact geodesic
+distances to portals sampled on the straight cut lines of a kd hierarchy over the terrain. A window lemma lets us
+sample the cuts instead of storing them whole, an ellipse lemma makes every label an exact geodesic computed on a
+small sub-mesh, and the 1-Lipschitz label rows give the lower bound. A capped variant with certify-or-refine stores
+$O\big((k+\eps^{-1}\log k)\,n\log n\big)$ labels and answers every query with a certificate or exactly. On the six
+terrains of the UP-Oracle paper with 0.5M faces, \cci answers in 0.5--2.1\,$\mu$s on one core with a mean error of
+0.001--0.03\% in 0.36--0.66\,GB, and answers exact 10-nearest-neighbour queries over 10,000 objects in 0.3--0.5\,ms;
+EAR-Oracle needs 333\,GB and 0.4--1\,s per query for a mean error of 2.6--2.9\%, and DGG, the most accurate
+competitor, 0.3--0.8\,s per query with no bound. Up to 5M faces the capped index grows like $n^{1.14}$. All 6.8
+million answers we checked are certified and correct. The same index answers queries between arbitrary surface
+points and extends to weighted terrains and terrains with obstacles.
 \end{abstract}
 
 \maketitle
@@ -72,44 +73,82 @@ The most accurate practical method we found is not a terrain oracle at all: DGG~
 minutes a sparse graph whose shortest paths approximate geodesics to a factor $1+\eps$, and with $\eps=10^{-4}$ its
 mean error is about 0.004\%. But DGG answers every query with a Dijkstra search on that graph, 0.3--6.9\,s on terrains
 with 0.5--5M faces, and returns no bound. It is a better surface model, not an index; what it lacks is exactly what
-an index provides. More
-importantly, a returned distance comes with no indication of its error.
+an index provides.
 
-Road networks faced the same problem and solved it with labelling indexes. H2H~\cite{ouyang2018hierarchy}
-and hierarchical cut labelling~\cite{farhan2023hierarchical} let every vertex store its distances to the
-separator vertices of its ancestors, so that a query is a minimum over one separator. The same layout is
-behind Thorup's approximate oracles for planar graphs~\cite{thorup2004compact}, which keep distances to
-$O(1/\eps)$ portals on shortest-path separators, and it has been carried to weighted polyhedral surfaces
-through Steiner graphs~\cite{aleksandrov2010algorithms,djidjev2011approximate} and to mesh geodesics with
-compressed distance functions~\cite{gotsman2022compressing}. These indexes return a single value. On a
-terrain that value either rests on a discretised surface or comes with no bound that the query can check.
+What none of these methods provides is a statement about a single answer. A query operator needs more than a good
+average. A kNN query compares the distances of many candidates, a range query compares each with a radius, and a
+planner may need to know that a route is no longer than a limit. With a point estimate of unknown error, every such
+decision is a guess near its boundary; with an interval $\LB\le d\le\UB$ that is guaranteed to contain the exact
+surface distance, most decisions can be made from the intervals alone, and the few that cannot are exactly the ones
+worth computing exactly (Figure~\ref{fig:knn}). An oracle whose answer $\hat d$ is a path length with a guarantee
+$\hat d\le(1+\eps)d$ implies the interval $[\hat d/(1+\eps),\hat d]$, but only if the guarantee is against the exact
+distance, which the Steiner-graph oracles do not give, and its width is always $\eps$. To decide a query, the
+interval must be narrow when it can be and known to be narrow.
 
-We propose the Certified Cut Index (\cci). We keep the label layout and the minimum over one cut, and change
-three things. First, the separators are straight axis-parallel cut lines of a kd
-hierarchy~\cite{bentley1975multidimensional} over the chart of the terrain, not shortest paths. The portal
-argument of Thorup's oracles needs a shortest-path separator, so we replace it with a window lemma that bounds
-where a shortest path can cross a cut and what crossing far away costs; portals are then sampled at an arc
-gap $g$ near the region and at geometrically growing gaps away from it. Second, every label is an exact
-geodesic distance on the continuous surface, computed on a small sub-mesh, rather than a graph, Steiner-graph
-or fitted value. Third, a straight cut makes the label rows 1-Lipschitz in arc length along the cut, and this
-gives a lower bound next to the upper bound, so each query returns an interval $\LB\le d\le\UB$ that is
-certified against the exact surface distance and is within a factor $1\pm\eps$ of it. Any oracle whose answer
-$\hat d$ is a path length with a guarantee $\hat d\le(1+\eps)d$ implies the interval $[\hat d/(1+\eps),\hat d]$,
-but only if the guarantee is against the exact distance, and its width is always $\eps$. Ours adapts to the
-query: at $\eps=0.2$ its median width is 0.35\%. The interval is what lets the index decide kNN and range
-queries exactly and refine exactly only the pairs it cannot certify.
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[x=6.2cm,y=0.42cm,font=\scriptsize]
+  \draw[->,gray] (0,0) -- (1.02,0) node[right] {$d(s,\cdot)$};
+  \foreach \y/\lo/\up/\lab/\col in {5/0.10/0.17/$o_1$/green!50!black, 4/0.26/0.36/$o_2$/green!50!black,
+      3/0.47/0.58/$o_3$/orange!80!black, 2/0.53/0.63/$o_4$/orange!80!black, 1/0.78/0.90/$o_5$/gray}
+    { \draw[very thick,\col] (\lo,\y) -- (\up,\y);
+      \draw[\col] (\lo,\y-0.25) -- (\lo,\y+0.25); \draw[\col] (\up,\y-0.25) -- (\up,\y+0.25);
+      \node[anchor=east] at (\lo-0.01,\y) {\lab}; }
+  \draw[dashed,gray] (0.47,0) -- (0.47,5.6) node[above] {3rd smallest $\LB$};
+  \fill[orange!80!black] (0.55,3) circle (1.6pt); \fill[orange!80!black] (0.60,2) circle (1.6pt);
+  \node[anchor=west,green!40!black] at (0.18,5) {in: $\UB<$ 3rd $\LB$};
+  \node[anchor=west,orange!70!black] at (0.64,2.5) {overlap: one exact sweep};
+  \node[anchor=west,gray] at (0.91,1) {out};
+\end{tikzpicture}
+\caption{A certified 3-NN query from the intervals (schematic). $o_1$ and $o_2$ are in the answer because their
+upper bounds lie below the third smallest lower bound, and $o_5$ is out. Only $o_3$ and $o_4$ overlap, so one exact
+sweep from $s$ decides between them (dots). With 10,000 objects at 0.5M faces, an exact 10-NN query needs such a
+sweep in 13--22\% of the queries, for 0.3--0.5 objects on average, and takes 0.3--0.5\,ms against seconds for a sweep
+over the terrain and 4--7\,ms for a pruned on-the-fly search.}
+\label{fig:knn}
+\end{figure}
+
+Road networks faced the problem of fast distance queries and solved it with labelling indexes.
+H2H~\cite{ouyang2018hierarchy} and hierarchical cut labelling~\cite{farhan2023hierarchical} let every vertex store
+its distances to the separator vertices of its ancestors, so that a query is a minimum over one separator. The same
+layout is behind Thorup's approximate oracles for planar graphs~\cite{thorup2004compact}, which keep distances to
+$O(1/\eps)$ portals on shortest-path separators, and it has been carried to weighted polyhedral surfaces through
+Steiner graphs~\cite{aleksandrov2010algorithms,djidjev2011approximate} and to mesh geodesics with compressed
+distance functions~\cite{gotsman2022compressing}. These indexes return a single value. On a terrain that value
+either rests on a discretised surface or comes with no bound that the query can check.
+
+We propose the Certified Cut Index (\cci), a labelling index for terrain surfaces whose every answer is a certified
+interval. We keep the label layout and the minimum over one cut, and change three things. First, the separators are
+straight axis-parallel cut lines of a kd hierarchy~\cite{bentley1975multidimensional} over the chart of the terrain,
+not shortest paths. The portal argument of Thorup's oracles needs a shortest-path separator, so we replace it with a
+window lemma that bounds where a shortest path can cross a cut and what crossing far away costs; portals are then
+sampled at an arc gap $g$ near the region and at geometrically growing gaps away from it. Second, every label is an
+exact geodesic distance on the continuous surface, computed on a small sub-mesh, rather than a graph, Steiner-graph
+or fitted value. Third, a straight cut makes the label rows 1-Lipschitz in arc length along the cut, and this gives a
+lower bound next to the upper bound. The resulting interval adapts to the query: at $\eps=0.2$ its median width is
+0.36\% uncapped and 2\% with a cap of 64 portals per cut, far below $\eps$. In summary
+(Theorems~\ref{thm:main}--\ref{thm:a2a}):
+
+\begin{headline}[informal]
+Let $T$ be a terrain with face weights at least $\lambda>0$, and let $\eps\in(0,1)$ and $g>0$. For every pair of
+vertices the index returns $\LB\le d\le\UB$ with $(1-\eps)d\le\LB$ and $\UB\le(1+\eps)d$, in time linear in the
+depth of the hierarchy and the number of portals of one cut. With at most $k$ portals per cut inside the region,
+it stores $O\big((k+\eps^{-1}\log k)\,n\log n\big)$ labels, and every answer satisfies $\UB\le(1+\eps)\LB$ or is
+computed exactly. Between arbitrary surface points, $\UB\le(1+2\eps)\LB$.
+\end{headline}
+
 Our contributions are as follows:
-(i) the Certified Cut Index and its $(1+\eps)$ guarantee, built on a window lemma that bounds where a
-shortest path can cross a cut, an ellipse lemma that makes labels computable exactly on small sub-meshes,
-and an interval lower bound read from the labels (Section~\ref{sec:index});
-(ii) a capped variant with certify-or-refine whose labels are near-linear in $n$, and certified queries
-between arbitrary surface points (Sections~\ref{sec:capped} and~\ref{sec:a2a});
+(i) a certified-interval distance oracle for terrains and its $(1+\eps)$ guarantee, built on a window lemma that
+bounds where a shortest path can cross a straight cut, an ellipse lemma that makes labels computable exactly on small
+sub-meshes, and a lower bound read from the 1-Lipschitz label rows (Section~\ref{sec:index});
+(ii) certified kNN and range queries that decide from the intervals and refine exactly only what they cannot decide,
+and a capped variant with certify-or-refine whose labels are near-linear in $n$
+(Sections~\ref{sec:capped}, \ref{sec:a2a} and~\ref{sec:engineering});
 (iii) engineering that keeps the bounds sound while making the index fast and compact: hybrid exact sweeps,
-closed-loop 8/16-bit label coding, a parallel build with bit-identical labels, and certified kNN and range
-queries (Section~\ref{sec:engineering});
+closed-loop 8/16-bit label coding and a parallel build with bit-identical labels (Section~\ref{sec:engineering});
 (iv) an extension to weighted terrains and terrains with obstacles; and
-(v) an evaluation against every terrain oracle with available code and a learned baseline, run with the
-authors' code on the same machine and the same queries, on terrains from 800 vertices to 5M faces
+(v) an evaluation against every terrain oracle with available code, a mesh-geodesic index and a learned baseline,
+run on the same machine and the same queries, on terrains from 800 vertices to 5M faces
 (Section~\ref{sec:experiments}).
 
 \section{Related work}
@@ -164,6 +203,8 @@ are sampled on a fixed grid, and pairs in the same leaf use the Euclidean distan
 if every fit is accurate everywhere, which the method does not enforce, and it reports mean errors of
 0.1--0.4\% on meshes of up to 5k vertices. Because its distances are restricted to patches, every ancestor curve
 has to be scanned; our labels are distances on the whole surface, so the deepest separating cut suffices.
+% SEP-RESULTS: We reimplemented SEP over exact VTP sweeps (its code is not public) and compare against it in
+% Section~\ref{sec:server}.
 Landmark methods store distances to a few sample points: Xin et al.~\cite{xin2012constant} interpolate them
 in constant time without a bound, and Burghard and Klein~\cite{burghard2015simple} return the triangle-inequality
 lower and upper bounds through the landmarks, whose relative width is not bounded.
@@ -779,6 +820,7 @@ a certified bound.}
  & DGG, $10^{-3}$ & 2\,min & 0.76\,GB & 280\,ms & 0.035\% & 0.16\%\\
  & DGG, $10^{-4}$ & 7\,min & 2.4\,GB & 819\,ms & 0.0040\% & 0.036\%\\
  & NeuroGF (800 ep.) & 6.9\,h & 0.25\,MB & 0.39\,ms & 0.36\% & 9.1\%\\
+% SEP-RESULTS (TJ): & SEP (reimpl.) & XX\,h & XX\,MB & XX\,$\mu$s & XX\% & XX\%\\  % results/server/sep.TJpre_500000.json; raise the multirow count by one
  & exact VTP & -- & -- & 4.2\,s & 0 & 0\\
 \midrule
 \multirow{7}{*}{GI} & ours, uncapped & 12.3\,h & 0.62\,GB & 1.6\,$\mu$s & 0.0025\% & 0.21\%\\
@@ -787,6 +829,7 @@ a certified bound.}
  & EAR-Oracle, sp 5 & 21.3\,h & 333\,GB & 993\,ms & 2.85\% & 8.46\%\\
  & DGG, $10^{-4}$ & 7\,min & 2.4\,GB & 814\,ms & 0.0036\% & 0.015\%\\
  & NeuroGF & 3.5\,h & 0.25\,MB & 0.37\,ms & 0.44\% & 11.4\%\\
+% SEP-RESULTS (GI): & SEP (reimpl.) & XX\,h & XX\,MB & XX\,$\mu$s & XX\% & XX\%\\  % results/server/sep.GIpre_500000.json; raise the multirow count by one
  & exact VTP & -- & -- & 3.9\,s & 0 & 0\\
 \bottomrule
 \end{tabular}
@@ -828,6 +871,12 @@ pairs are off by 4--13\%, with no indication of which. We checked that this is n
 Distance-to-surface targets measured exactly instead of against a subsampled surface give the same accuracy (0.41\%
 against 0.40\% on TJ), and 800 epochs instead of their 400 lower the mean error by 11--15\% and the maximum from 13.4\%
 to 9.1\%, at twice the training time. An exact VTP sweep takes 3.9--4.2\,s per query.
+% SEP-RESULTS: SEP~\cite{gotsman2022compressing}, which we reimplemented with exact VTP sweeps, builds in XX\,h into
+% XX\,MB (XX doubles per vertex) and answers in XX\,$\mu$s with a mean error of XX\% on TJ and GI, close to the
+% 0.1--0.4\% reported for meshes of up to 5k vertices. Its errors go both ways, from $-$XX\% to $+$XX\%, and nothing in
+% the answer says which pairs are off; at a comparable size our cap-64 index has a mean error of 0.021--0.029\% and a
+% certified interval for every answer. Same-leaf pairs, which SEP answers with the Euclidean distance, did not occur
+% among the 2,000 pairs (XX).
 
 \paragraph{When the build pays off.}
 Our build takes hours where DGG's takes minutes, but it is amortised quickly. With cap 64 at 0.5M faces
@@ -982,11 +1031,12 @@ answers in 0.7--0.9\,$\mu$s with a mean error of 0.003--0.008\%, against UP-Orac
 (25\,MB, 0.04--3\,h), as on the small terrains.
 
 \paragraph{Proximity over many objects.}
-With 10,000 random objects at 0.5M faces, certified-approximate kNN answers in 33--130\,$\mu$s for $k=1$ and
-54--154\,$\mu$s for $k=10$ with recall of at least 98.9\%. The exact mode needs a sweep only for the candidates near
-the answer boundary: 38--140\,$\mu$s for $k=1$ and 0.3--0.4\,ms for $k=10$, against 2.7--3.2\,s for one exact
-sweep from the query point. At 2.5M faces, $k=10$ takes 0.6\,ms approximately and 2.6\,ms exactly, against an 11\,s
-sweep.
+With 10,000 random objects at 0.5M faces, certified-approximate kNN answers in 23--155\,$\mu$s for $k=1$ and
+60--169\,$\mu$s for $k=10$ with recall of at least 98.9\%. The exact mode needs a sweep only for the candidates the
+intervals cannot separate, in 0--2\% of the queries for $k=1$ and 13--22\% for $k=10$ (0.3--0.5 objects per query on
+average): 24--158\,$\mu$s for $k=1$ and 0.3--0.5\,ms for $k=10$. An on-the-fly search from the query point that stops
+once the $k$ nearest objects are settled, pruned by chart distances, takes 1.2--1.9\,ms and 3.8--7.0\,ms, and a full
+sweep 2.7--3.2\,s. At 2.5M faces, $k=10$ takes 0.4\,ms approximately and 2.5\,ms exactly, against an 11\,s sweep.
 
 \paragraph{The small terrains on the cluster.}
 Rerunning the small-terrain configurations of Table~\ref{tab:main} on the cluster gives the same picture: on
@@ -1002,6 +1052,28 @@ decide most candidates from the intervals alone, and a user who needs a guarante
 the length of an actual path, or for an exact refinement only when the interval is too wide. DGG reaches a similar
 accuracy with a much shorter build, and the two are complementary: DGG is a compact surface model searched per query,
 our index precomputes the answers, which pays off after a few thousand to a few tens of thousands of queries.
+Table~\ref{tab:guide} sums up which method to use when, from our measurements.
+
+\begin{table}[t]
+\caption{Which method to use, from the measurements of Section~\ref{sec:experiments}. Break-even counts at 0.5--5M
+faces include our build.}
+\label{tab:guide}
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}p{0.43\columnwidth}p{0.53\columnwidth}@{}}
+\toprule
+situation & method\\
+\midrule
+a few queries, terrain not queried again & exact VTP sweep, or DGG for a few hundred (no bound)\\
+distances among a fixed set of up to $\sim$2,500 POIs & exact $P\times P$ table, one sweep per POI\\
+$10^3$--$10^5$ queries, no bound needed & DGG: builds in minutes, 0.3--7\,s per query\\
+beyond 590--13,500 queries (vs.\ VTP) or 5,700--54,000 (vs.\ DGG) & \cci: microsecond answers\\
+a bound on each answer, or exact kNN and range & \cci, with refine for undecided pairs\\
+memory-bound index & \cci with cap 64: near-linear size\\
+terrain that changes & on-the-fly sweeps; UP-Oracle for POIs\\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{Limitations}
 

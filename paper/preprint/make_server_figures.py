@@ -14,7 +14,7 @@ R = os.path.join(ROOT, "results", "server")
 OUT = os.path.join(ROOT, "paper", "preprint", "figures")
 plt.rcParams.update({"font.size": 8, "font.family": "serif", "axes.linewidth": 0.6, "pdf.fonttype": 42})
 # categorical order of the paper (validated: lightness band, chroma, CVD and contrast all pass); markers differ too
-C = {"ours": "#1b9e77", "EAR-Oracle": "#d95f02", "DGG": "#7570b3", "NeuroGF": "#b8860b"}
+C = {"ours": "#1b9e77", "EAR-Oracle": "#d95f02", "DGG": "#7570b3", "NeuroGF": "#b8860b", "SEP": "#e7298a"}
 
 
 def J(name):
@@ -51,7 +51,7 @@ for col, T in enumerate(("TJ", "GI")):
             v = var(d, vv)
             if v:
                 ours.append((v["query_us"], v["index_bytes"] / 1e6, 100 * v["est_mean"], d["k_max"] > 0))
-    comp = {"EAR-Oracle": [], "DGG": [], "NeuroGF": []}
+    comp = {"EAR-Oracle": [], "DGG": [], "NeuroGF": [], "SEP": []}
     for r in J(f"ear.{M}.V2V.json") or []:
         if r.get("complete"):
             comp["EAR-Oracle"].append((r["query_us_mean"], r["index_MB"], r["err_mean"], r["log"].split("_sp")[1].split(".")[0]))
@@ -64,6 +64,9 @@ for col, T in enumerate(("TJ", "GI")):
         if n:
             s = {x["set"]: x for x in n["sets"]}
             comp["NeuroGF"].append((n["query_us"], n["index_bytes"] / 1e6, 100 * s["V2V"]["err_mean"], lab))
+    sep = J(f"sep.{M}.json")  # our reimplementation of Gotsman and Hormann 2022 (cpp/tools/sep_bench.cpp)
+    if sep:
+        comp["SEP"].append((sep["query_us"], sep["index_bytes"] / 1e6, 100 * sep["err_mean"], ""))
     vtp = J(f"onthefly.{T}_500000.json")
     for row, (xi, xlab) in enumerate(((0, r"query time ($\mu$s, one CPU thread)"), (1, "index size (MB)"))):
         ax = axes[row, col]
@@ -71,8 +74,10 @@ for col, T in enumerate(("TJ", "GI")):
         ax.plot([p[xi] for p in ours if not p[3]], [p[2] for p in ours if not p[3]], "D", ms=3.5, color=C["ours"], alpha=0.35, mew=0)
         ax.plot([p[xi] for p in ours if p[3]], [p[2] for p in ours if p[3]], "D", ms=3.5, mfc="none", color=C["ours"], alpha=0.5, mew=0.6)
         ax.plot([x for x, _ in fr], [y for _, y in fr], "-D", ms=4, lw=1.0, color=C["ours"], label="ours (Pareto front)")
-        for name, mk in (("EAR-Oracle", "^"), ("DGG", "s"), ("NeuroGF", "o")):
+        for name, mk in (("EAR-Oracle", "^"), ("DGG", "s"), ("NeuroGF", "o"), ("SEP", "v")):
             pts = comp[name]
+            if not pts:
+                continue
             ax.plot([p[xi] for p in pts], [p[2] for p in pts], mk, ms=6, color=C[name], label=name, ls="none")
             for p in pts:
                 lab = ("sp " + p[3]) if name == "EAR-Oracle" else p[3]
@@ -92,7 +97,7 @@ for col, T in enumerate(("TJ", "GI")):
         if row == 0:
             ax.set_title(f"{T}, 0.5M faces ({J(f'ours.{T}.kd.json')['n']:,} vertices)", fontsize=8)
 h, l = axes[0, 0].get_legend_handles_labels()
-fig.legend(h, l, loc="upper center", ncol=4, fontsize=7, frameon=False, bbox_to_anchor=(0.5, 1.02))
+fig.legend(h, l, loc="upper center", ncol=5, fontsize=7, frameon=False, bbox_to_anchor=(0.5, 1.02))
 fig.tight_layout(rect=(0, 0, 1, 0.95))
 fig.savefig(os.path.join(OUT, "fig_server_methods.pdf"), bbox_inches="tight")
 

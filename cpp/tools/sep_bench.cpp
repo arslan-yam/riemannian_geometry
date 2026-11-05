@@ -520,6 +520,7 @@ static inline double eval(const Sep& S, const Fit& f, const Curve& c, double t) 
     return f.sq ? std::sqrt(std::max(p, 0.0)) : p;
 }
 
+static long q_curves = 0, q_evals = 0, q_levels = 0;  // query work counters
 static double query(const Sep& S, int x, int y, int* same_leaf = nullptr) {
     if (x == y) return 0;
     int lx = S.leaf[x], ly = S.leaf[y];
@@ -542,10 +543,12 @@ static double query(const Sep& S, int x, int y, int* same_leaf = nullptr) {
         int nd = S.anc(a, d);
         const auto& cs = S.nodes[nd].curves;
         int ox = S.fit_off[x][d], oy = S.fit_off[y][d];
+        ++q_levels;
         for (size_t k = 0; k < cs.size(); ++k) {
             const Fit &fx = S.fits[x][ox + k], &fy = S.fits[y][oy + k];
             if (fx.mn + fy.mn >= best) continue;  // quick reject
             const Curve& c = S.curves[cs[k]];
+            ++q_curves; q_evals += c.grid;
             for (int g = 0; g < c.grid; ++g) {
                 double t = c.len * g / (c.grid - 1);
                 best = std::min(best, eval(S, fx, c, t) + eval(S, fy, c, t));
@@ -655,11 +658,14 @@ int main(int argc, char** argv) {
             qp.push_back({s, t}); tr.push_back(d);
         }
     }
+    { long gs = 0; int gm = 0; double lm = 0; for (auto& c : S.curves) { gs += c.grid; gm = std::max(gm, c.grid); lm = std::max(lm, c.len); }
+      std::printf("curves: mean grid %.1f, max grid %d, longest %.3g (scale %.3g)\n", (double)gs / std::max<size_t>(1, S.curves.size()), gm, lm, S.scale); }
     if (qp.empty()) return 0;
     std::vector<double> est(qp.size()); int same = 0;
     auto tq = Clock::now();
     for (size_t k = 0; k < qp.size(); ++k) est[k] = query(S, qp[k].first, qp[k].second);
     double q_us = 1e6 * secs(tq) / qp.size();
+    std::printf("query work per pair: %.1f levels, %.1f curves evaluated, %.0f grid points\n", (double)q_levels / qp.size(), (double)q_curves / qp.size(), (double)q_evals / qp.size());
     std::vector<double> ae; double esum = 0, emax = -1e300, emin = 1e300;
     for (size_t k = 0; k < qp.size(); ++k) {
         int sl = 0; query(S, qp[k].first, qp[k].second, &sl); same += sl;
