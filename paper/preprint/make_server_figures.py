@@ -64,10 +64,11 @@ for col, T in enumerate(("TJ", "GI")):
         if n:
             s = {x["set"]: x for x in n["sets"]}
             comp["NeuroGF"].append((n["query_us"], n["index_bytes"] / 1e6, 100 * s["V2V"]["err_mean"], lab))
-    sep = J(f"sep.{M}.json")  # our reimplementation of Gotsman and Hormann 2022 (cpp/tools/sep_bench.cpp)
+    # our reimplementation of Gotsman and Hormann 2022 (cpp/tools/sep_bench.cpp); the rerun with warm-up query timing
+    sep = J(f"sep_warm.{M}.json") or J(f"sep.{M}.json")
     if sep:
         comp["SEP"].append((sep["query_us"], sep["index_bytes"] / 1e6, 100 * sep["err_mean"], ""))
-    vtp = J(f"onthefly.{T}_500000.json")
+    vtp = J(f"onthefly_fixed/onthefly.{T}_500000.json")  # VTP after the fix (Section "Two defects in VTP")
     for row, (xi, xlab) in enumerate(((0, r"query time ($\mu$s, one CPU thread)"), (1, "index size (MB)"))):
         ax = axes[row, col]
         fr = front([(p[xi], p[2]) for p in ours])
@@ -129,6 +130,8 @@ for T in ("TJ", "GI"):
         sz = np.array([(var(d, "dense/sym") or d["variants"][0])["index_bytes"] / 1e9 for d, _ in rows])
         kb = np.polyfit(np.log(nb), np.log(b), 1)[0] if len(nb) > 2 else None
         ks = np.polyfit(np.log(n), np.log(sz), 1)[0] if len(n) > 2 else None
+        print(f"fit {T} {tag}: build n^{kb:.2f}" if kb else f"fit {T} {tag}: no build fit", f"size n^{ks:.2f}" if ks else "",
+              "builds (h):", " ".join(f"{x:.1f}" for x in b))
         mfc = color if mk == "D" else "none"
         axes[0].plot(nb, b, ls[T] + mk, color=color, mfc=mfc, ms=4, lw=1, label=f"{T} {lab}" + (f" ($n^{{{kb:.2f}}}$)" if kb else ""))
         axes[1].plot(n, sz, ls[T] + mk, color=color, mfc=mfc, ms=4, lw=1, label=f"{T} {lab}" + (f" ($n^{{{ks:.2f}}}$)" if ks else ""))
