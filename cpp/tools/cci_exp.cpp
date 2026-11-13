@@ -444,6 +444,9 @@ int main(int argc, char** argv) {
             // the LB only, and an UB below D is a path the reference missed (counted, not an error)
             bool sound = true;
             int ub_below = 0;
+            // strict check, without the 1e-9 tolerance: how many answers lie outside their raw interval, and by how
+            // much (relative), so the tolerance of the soundness check can be reported as unused or quantified
+            int strict_viol = 0; double max_viol = 0;
             double emean = 0, emax = 0, ubmax = 0, ubmean = 0, worst_ratio = 0;
             std::vector<double> errs, widths;
             for (size_t i = 0; i < mq; ++i) {
@@ -454,6 +457,11 @@ int main(int argc, char** argv) {
                     sound = false;
                 }
                 ub_below += weighted && u < d * (1 - 1e-9);
+                {
+                    double vl = d > 0 ? l / d - 1 : (l > 0 ? 1 : 0), vu = weighted ? 0 : (u > 0 ? d / u - 1 : (d > 0 ? 1 : 0));
+                    double viol = std::max(0.0, std::max(vl, vu));
+                    strict_viol += viol > 0; max_viol = std::max(max_viol, viol);
+                }
                 double e = std::fabs(est / d - 1);
                 errs.push_back(e); emean += e; emax = std::max(emax, e);
                 ubmax = std::max(ubmax, u / d - 1); ubmean += u / d - 1;
@@ -471,13 +479,14 @@ int main(int argc, char** argv) {
                         mesh.c_str(), opt.eps, opt.gap_factor, opt.hierarchy.c_str(), opt.k_max, opt.threads, opt.poi.size(), vname.c_str(), refine ? "+refine" : "", set.c_str(), band, mq,
                         tb, rss, ix.nbytes() / 1e6, ix.near_bytes() / 1e6, best * 1e6, qmean * 1e6, qs[(size_t)(0.99 * (mq - 1))] * 1e6, qs.back() * 1e6,
                         refined, mq, weighted ? " (LB vs reference)" : "", sound ? "yes" : "NO", 100 * ubmax, 100 * emean, 100 * p99, 100 * emax, 100 * widths[mq / 2], worst_ratio);
+            std::printf("  strict (no tolerance): %d of %zu answers outside the raw interval, max relative violation %.3g\n", strict_viol, mq, max_viol);
             std::fflush(stdout);
             js << (firstv ? "" : ",") << "{\"variant\":\"" << vname << "\",\"set\":\"" << set << "\",\"near\":\"" << nv << "\",\"near_bytes\":" << ix.near_bytes();
             if (lo >= 0) js << ",\"band_lo\":" << lo << ",\"band_hi\":" << hi;
             js << ",\"refine\":" << (refine ? "true" : "false")
                << ",\"index_bytes\":" << ix.nbytes() << ",\"prep_s\":" << tprep << ",\"query_us\":" << best * 1e6
                << ",\"query_us_refine_mean\":" << qmean * 1e6 << ",\"query_us_refine_p99\":" << qs[(size_t)(0.99 * (mq - 1))] * 1e6
-               << ",\"refined\":" << refined << ",\"mmp_fallbacks\":" << ix.mmp_fallbacks.load() << ",\"pairs\":" << mq << ",\"sound\":" << (sound ? "true" : "false") << ",\"ub_below_reference\":" << ub_below
+               << ",\"refined\":" << refined << ",\"mmp_fallbacks\":" << ix.mmp_fallbacks.load() << ",\"pairs\":" << mq << ",\"sound\":" << (sound ? "true" : "false") << ",\"ub_below_reference\":" << ub_below << ",\"strict_violations\":" << strict_viol << ",\"max_rel_violation\":" << max_viol
                << ",\"max_ub_err\":" << ubmax << ",\"ub_mean\":" << ubmean << ",\"est_mean\":" << emean << ",\"est_p99\":" << p99
                << ",\"est_max\":" << emax << ",\"width_median\":" << widths[mq / 2] << ",\"max_ub_over_lb\":" << worst_ratio
                << ",\"cover_entries\":" << ix.cover_entries << "}";

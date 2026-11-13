@@ -50,7 +50,10 @@ for col, T in enumerate(("TJ", "GI")):
         for vv in ("dense/sym", "code8/sym"):
             v = var(d, vv)
             if v:
-                ours.append((v["query_us"], v["index_bytes"] / 1e6, 100 * v["est_mean"], d["k_max"] > 0))
+                # time per answer: the lookup, or the end-to-end mean (one pass, refines included) when refines ran,
+                # so that every point's time measures the answer whose error it plots
+                q = v["query_us_refine_mean"] if v.get("refined", 0) > 0 else v["query_us"]
+                ours.append((q, v["index_bytes"] / 1e6, 100 * v["est_mean"], d["k_max"] > 0))
     comp = {"EAR-Oracle": [], "DGG": [], "NeuroGF": [], "SEP": []}
     for r in J(f"ear.{M}.V2V.json") or []:
         if r.get("complete"):

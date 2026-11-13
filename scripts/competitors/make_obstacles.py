@@ -4,6 +4,9 @@ smooth-metric prototype, rgeo/obstacles.py). Kinds:
   blobs  random disks, radius 2-6% of the chart side, until a fraction --cover of the chart area is gone
   walls  --walls long thin rotated rectangles (4 mean edges thick, 40-70% of the chart side), each with two
          gaps of 4% of the side: barriers that force long detours
+  comb   --teeth thin walls parallel to the y axis (4 mean edges thick, 90% of the chart height, alternately
+         from the bottom and the top edge): every cut line along x crosses all of them, so its window has
+         many runs (the adversarial case of the run count r_C of the capped size bound)
 Then the mesh is cleaned for the exact solvers: at every vertex where holes touch (several fans of faces)
 only the largest fan stays, and only the largest face-connected piece is kept; unused vertices go.
 usage: python3 scripts/competitors/make_obstacles.py in.off out.off --kind blobs --cover 0.1 [--seed 1]
@@ -19,7 +22,8 @@ from rgeo.terrain import read_off, write_off
 
 ap = argparse.ArgumentParser()
 ap.add_argument("inp"); ap.add_argument("out")
-ap.add_argument("--kind", choices=["blobs", "walls"], required=True)
+ap.add_argument("--kind", choices=["blobs", "walls", "comb"], required=True)
+ap.add_argument("--teeth", type=int, default=40)
 ap.add_argument("--cover", type=float, default=0.1)
 ap.add_argument("--walls", type=int, default=6)
 ap.add_argument("--seed", type=int, default=1)
@@ -45,6 +49,13 @@ if a.kind == "blobs":
         r = L * rng.uniform(0.02, 0.06)
         removed |= ((C - c) ** 2).sum(1) < r * r
         obstacles.append({"type": "circle", "cx": float(c[0]), "cy": float(c[1]), "r": float(r)})
+elif a.kind == "comb":
+    thick = 4 * edge
+    for i in range(a.teeth):
+        x = lo[0] + (i + 1) / (a.teeth + 1) * (hi[0] - lo[0])
+        y0, y1 = (lo[1], lo[1] + 0.9 * (hi[1] - lo[1])) if i % 2 == 0 else (lo[1] + 0.1 * (hi[1] - lo[1]), hi[1])
+        removed |= (np.abs(C[:, 0] - x) < thick / 2) & (C[:, 1] > y0) & (C[:, 1] < y1)
+        obstacles.append({"type": "tooth", "x": float(x), "y0": float(y0), "y1": float(y1), "thickness": float(thick)})
 else:
     thick = 4 * edge
     for _ in range(a.walls):
@@ -131,7 +142,7 @@ used = np.unique(Fk)
 remap = -np.ones(len(V), dtype=np.int64); remap[used] = np.arange(len(used))
 V2, F2 = V[used], remap[Fk]
 write_off(a.out, V2, F2)
-info = {"input": a.inp, "kind": a.kind, "seed": a.seed, "cover_target": a.cover if a.kind == "blobs" else None,
+info = {"input": a.inp, "kind": a.kind, "seed": a.seed, "cover_target": a.cover if a.kind == "blobs" else None, "teeth": a.teeth if a.kind == "comb" else None,
         "faces_in": int(len(F)), "faces_out": int(len(F2)), "vertices_out": int(len(V2)),
         "removed_area_frac": area_removed, "removed_by_obstacles": int(removed.sum()),
         "faces_dropped_by_cleaning": int(keep.sum() - len(F2)), "fans_fixed": fans_fixed,

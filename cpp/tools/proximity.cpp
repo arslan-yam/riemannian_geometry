@@ -22,7 +22,7 @@
 // usage: proximity mesh.off [--eps 0.2] [--gap-factor 1] [--kmax K] [--store code8] [--near-store sym]
 //        [--threads 1] [--objects 10000 | --poi-file f] [--queries 100] [--k 1,10,100]
 //        [--radius 0.01,0.03,0.1] (fractions of the chart diagonal) [--seed 7] [--truth-cache f] [--json out.json]
-//        [--queries-from-objects] [--poi-index] [--export prefix]
+//        [--queries-from-objects] [--poi-index] [--export prefix] [--export-only]
 // POI workloads (the setting of UP-Oracle): --queries-from-objects draws the query vertices among the objects
 // (a query is then one of the objects, at distance 0: kNN asks internally for k + 1 and reports k);
 // --poi-index indexes the objects only (Options::poi); --export writes prefix.pairs, one line
@@ -57,6 +57,7 @@ int main(int argc, char** argv) {
     int M = 10000, Q = 100, seed = 7;
     bool profile = false, from_objects = false, poi_index = false;
     std::string export_prefix;
+    bool export_only = false;  // --export-only: write the pairs (from the truth cache) and stop, no index
     for (int i = 2; i < argc; ++i) {
         std::string a = argv[i];
         auto nx = [&]() { return std::string(argv[++i]); };
@@ -79,6 +80,7 @@ int main(int argc, char** argv) {
         else if (a == "--queries-from-objects") from_objects = true;
         else if (a == "--poi-index") poi_index = true;
         else if (a == "--export") export_prefix = nx();
+        else if (a == "--export-only") export_only = true;
     }
     std::vector<double> V; std::vector<unsigned> F;
     read_off(mesh, V, F);
@@ -154,6 +156,7 @@ int main(int argc, char** argv) {
         for (int i = 0; i < Q; ++i)
             for (int j = 0; j < M; ++j) if (obj[j] != qv[i]) o << qv[i] << " " << obj[j] << " " << D[(size_t)i * M + j] << "\n";
     }
+    if (export_only) return 0;
     // the pruned on-the-fly baseline: one MMP solver (early stop) on the whole mesh, built once
     std::unique_ptr<Solver> mmp(make_mmp(T.V, T.F, true));
     // the index

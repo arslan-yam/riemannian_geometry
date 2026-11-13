@@ -138,6 +138,37 @@ Results:
 - NeuroGF: `neurogf.<mesh>.json`, with the errors per set and by detour band, query time on one CPU thread
   and batched on the GPU, model size, training time and the GPU name.
 
+## 4c. Review experiments (`review` phase, November 2026)
+
+These are the extra runs the November 2026 review asked for: DGG point-to-point, kNN, CH and hub labels; exact-landmark intervals; adversarial TJ variants; build repeats; strict soundness counters. They need the
+`prepare`/`truth`/`competitors` outputs already in `results/server` (meshes, truth caches, `comp/*.V2V.*`),
+and the tools in `cpp/bin2`:
+
+```bash
+cd ~/rg && git pull && source scripts/server/hpc_env.sh && make -C cpp -j8 BIN=bin2 all dgg bin2/landmark_bench
+```
+
+Submit everything (about 70 jobs; they start at once, except the kNN jobs, which wait for `rv.proxexp.*`, and the adversarial chain make → truth → index):
+
+```bash
+SLURM=1 SLURM_ACCOUNT=<project> scripts/server/run_server.sh review 2>&1 | tee -a results/server/submit_review.log
+```
+
+One part only: `REVIEW_PARTS="landmark adv" SLURM=1 ...`. Expected wall times on type_d:
+- `rv.proxexp.*`, `rv.dgg.bench.*` and `rv.dgg.knn.*`: minutes to about 1 h.
+- `rv.ch.*`: up to 40 h (`CH_HOURS`; the contraction stalls on the dense DGG graph, so expect a time-limited core).
+- `rv.pll.*`: up to 72 h (`PLL_HOURS`). A run that hits the limit writes `"complete": false` and the hubs done so far.
+- `rv.lm.*`: 1–2 days, for the 2,048 exact sweeps.
+- `rv.adv.ours.*`: 1–5 days.
+- `rv.rep*`: like the main `ours` runs.
+
+Results go to `results/server/review/`. The tables are produced on the Mac:
+
+```bash
+python3 scripts/server/review_summary.py > notes/review_results.md
+python3 scripts/server/manifest.py --md notes/manifest.md
+```
+
 ## 5. Monitoring
 
 ```bash
@@ -157,13 +188,13 @@ tail -3 results/server/logs/<job>.log             # what one job is doing
 - The multithreaded jobs (`prox.*`, `weighted.*.t16`, `threads.*`) answer their queries on one thread after
   the parallel build. If the cluster emails a low-load warning about one of them, that is why. A
   cancelled one can be resubmitted as above.
-- Maintenance is the last working day of each month (the next one is Fri 30 Oct): running jobs are killed
+- Maintenance is the last working day of each month (the next one is Mon 30 Nov 2026): running jobs are killed
   and requeued from the start. Submit so that the 3–6 day jobs end before it.
 
 ## 7. Copy the results back (on the Mac)
 
 ```bash
-rsync -av hse-hpc:rg/results/server/ results/server/ --exclude meshes/ --exclude 'dgg/*/*.binary' --exclude 'dgg/*/*.off'
+rsync -av hse-hpc:rg/results/server/ results/server/ --exclude meshes/ --exclude 'dgg/*/*.binary' --exclude 'dgg/*/*.off' --exclude review/work/
 ```
 
 The partial JSON files are valid, so you can copy while jobs are still running. Copy the results back before

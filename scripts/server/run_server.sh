@@ -15,6 +15,8 @@
 #     proxpoi    kNN / range queries in UP-Oracle's setting (their POI files), ours against the UP-Oracle family
 #     proxdgg    DGG on the proxpoi kNN / range workload (early-stopping Dijkstra on its graph)
 #     rerun      19 Oct fixes: EAR-Oracle with the authors' grid, UP-Oracle at eps 0.25, DGG with early exit
+#     review     the November 2026 review: DGG point-to-point, CH and hub labels, landmark intervals, adversarial
+#                terrains, build repeats, strict soundness counters (results in $O/review)
 #   SMOKE2=1 RG_OUT=results/server/smoke2: obstacles and neurogf on TJpre_1058, a few minutes
 # On one machine the jobs of a phase run JOBS at a time (JOBS_BIG / JOBS_PROX for the big ones), phase after
 # phase. With SLURM=1 every job is submitted as a Slurm job of its own (cores, memory and time from res()
@@ -138,6 +140,14 @@ res() { # Slurm resources of one job, by its name: cores, memory, time limit, GP
     ngfdata.*|ngfpool.*) c=$NGF_THREADS; m=48G; t=12:00:00 ;;
     ngf.*.epochs800)  g=1; m=48G;           t=4-00:00:00 ;;
     ngf.*)            g=1; m=48G;           t=2-00:00:00 ;;
+    rv.pll.*)        c=8; m=128G;           t=4-00:00:00 ;;  # hub labels: memory through cores (8: the idle rule)
+    rv.ch.*)               m=64G;           t=2-00:00:00 ;;
+    rv.dgg.*|rv.proxexp.*|rv.adv.make.*) m=32G; t=1-00:00:00 ;;
+    rv.lm.*)               m=16G;           t=2-00:00:00 ;;
+    rv.adv.truth.*)        m=16G;           t=2-00:00:00 ;;
+    rv.adv.ours.*)         m=48G;           t=8-00:00:00 ;;  # steep terrains: larger sub-meshes, longer builds
+    rv.rep*)               m=16G;           t=4-00:00:00 ;;
+    rv.small.*)            m=8G;            t=1-00:00:00 ;;
     *)                     m=$((16 * k))G;  t=3-00:00:00 ;;
   esac
   echo "$c $m $t $g"
@@ -445,6 +455,71 @@ proxdgg) # DGG on the proxpoi workload (needs `make -C cpp BIN=bin2 bin2/dgg_knn
   for T in $PTERR; do for E in 0.001 0.0001; do
     echo "run proxdgg.$T.$E env DGG_BIN=$(ab $X2) scripts/server/dgg_knn_one.sh $T $E '$PPOIS'"
   done; done | par $JOBS_BIG > /dev/null ;;
+review) # the experiments asked by the November 2026 review, results in $O/review (the parts in $REVIEW_PARTS, default
+        # all, in this order). Tools from cpp/bin2: make -C cpp -j8 BIN=bin2 all dgg bin2/landmark_bench
+        #  proxexp   the 10,000-object kNN workload of the proximity runs (six terrains, 0.5M faces) as pairs files,
+        #            from their truth caches (proximity --export-only: no index is built)
+        #  dgg       DGG (eps 1e-3, 1e-4) on the six terrains: all 2,000 V2V pairs with the full and the point-to-point
+        #            Dijkstra, kNN / range on the proxexp workload; on TJ and GI also a contraction hierarchy and hub
+        #            labels on the graph (items 1, 2)
+        #  landmark  exact-landmark intervals, 16 to 2,048 landmarks, TJ and GI: V2V pairs and certified kNN (item 3)
+        #  adv       adversarial variants of TJ at 0.5M faces (scripts/competitors/make_adversarial.py, comb walls):
+        #            truth, our index uncapped and cap 64, DGG 1e-4 (item 5)
+        #  repeats   two more builds of our TJ and GI indexes (uncapped, cap 64) for the build-time spread, with the
+        #            strict (tolerance-free) soundness counters of cci_exp (items 4, 6)
+        #  small     the small terrains again with the strict counters (item 4)
+  RV=$O/review; mkdir -p $RV $RV/meshes
+  RX=$X2/cci_exp
+  PX=""
+  for part in ${REVIEW_PARTS:-proxexp dgg landmark adv repeats small}; do case $part in
+  proxexp)
+    PX=$(for T in $TERR; do M=${T}pre_500000
+      echo "run rv.proxexp.$T $X2/proximity $IN/$M.off --objects 10000 --queries 100 --truth-cache $O/truth/$M.prox --export $O/comp/prox.$T --export-only"
+    done | par $JOBS) ;;
+  dgg)
+    for T in $TERR; do M=${T}pre_500000; for E in 0.001 0.0001; do
+      echo "run rv.dgg.bench.$T.$E scripts/server/dgg_review_one.sh $M $E bench"
+    done; done | par $JOBS_BIG > /dev/null
+    for T in $TERR; do M=${T}pre_500000; for E in 0.001 0.0001; do
+      echo "run rv.dgg.knn.$T.$E scripts/server/dgg_review_one.sh $M $E knn"
+    done; done | DEP=$PX par $JOBS_BIG > /dev/null
+    for T in TJ GI; do M=${T}pre_500000; for E in ${REVIEW_INDEX_EPS:-0.001 0.0001}; do
+      echo "run rv.ch.$T.$E scripts/server/dgg_review_one.sh $M $E ch"
+      echo "run rv.pll.$T.$E scripts/server/dgg_review_one.sh $M $E pll"
+    done; done | par $JOBS_BIG > /dev/null ;;
+  landmark)
+    for T in TJ GI; do M=${T}pre_500000
+      echo "run rv.lm.$T $X2/landmark_bench $IN/$M.off $O/comp/$M.V2V.pairs $O/comp/$M.V2V.truth --L 16,64,256,1024,2048 --prox $O/comp/prox.$T.pairs --k 1,10,100 --json $RV/landmark.$T.json"
+    done | DEP=$PX par $JOBS_BIG > /dev/null ;;
+  adv)
+    for K in steep5 steep10 aniso slivers cluster ties comb; do M=TJadv_$K; F=$IN/$M.off; B=$IN/TJpre_500000.off
+      if [ $K = comb ]; then
+        mk="python3 scripts/competitors/make_obstacles.py $B $F --kind comb --teeth 40 && mv $IN/$M.json $RV/meshes/$M.json"
+      else
+        mk="python3 scripts/competitors/make_adversarial.py $B $IN/$M.raw.off --kind $K && python3 scripts/competitors/prepare_mesh.py $IN/$M.raw.off $F && mv $IN/$M.raw.json $RV/meshes/$M.json && rm $IN/$M.raw.off"
+      fi
+      a1=$(echo "run rv.adv.make.$K bash -c '$mk'" | par 1)
+      a2=$(echo "run rv.adv.truth.$K $RX $F --eps 0.2 --gap-factor 1 $QS $(truth $M) --export $O/comp/$M --truth-only" | DEP=$a1 par 1)
+      D=""; [ $K = comb ] && D="--detour-sets"
+      { echo "run rv.adv.ours.$K.kd $RX $F --eps 0.2 --gap-factor 1 $QS $(truth $M) $D $V --refine --json $RV/adv.$K.kd.json"
+        echo "run rv.adv.ours.$K.k64 $RX $F --eps 0.2 --gap-factor 1 --kmax 64 $QS $(truth $M) $D $V --refine --json $RV/adv.$K.k64.json"
+        echo "run rv.adv.dgg.$K scripts/server/dgg_review_one.sh $M 0.0001 bench"; } | DEP=$a2 par $JOBS > /dev/null
+    done ;;
+  repeats)
+    for r in 1 2; do for T in TJ GI; do F=$IN/${T}pre_500000.off; R2="$QS $(truth ${T}pre_500000)"
+      echo "run rv.rep$r.$T.kd $RX $F --eps 0.2 --gap-factor 1 $R2 $V --refine --json $RV/rep$r.$T.kd.json"
+      echo "run rv.rep$r.$T.k64 $RX $F --eps 0.2 --gap-factor 1 --kmax 64 $R2 $V --refine --json $RV/rep$r.$T.k64.json"
+    done; done | par $JOBS > /dev/null ;;
+  small)
+    for M in HorseMount BigMount HeadlightMount RobinsonMountain Gunnison10k; do
+      for C in "0.2 1" "0.1 0.5" "0.05 0.25"; do E=${C% *}; G=${C#* }
+        echo "run rv.small.$M.$E $RX data/terrains/$M.off --eps $E --gap-factor $G $QS $(truth $M.$E) $V --refine --json $RV/small.$M.$E.json"
+      done
+    done | par $JOBS > /dev/null
+    for M in GunnisonForest100k Laramie100k; do
+      echo "run rv.small.$M $RX data/terrains/large/$M.off --eps 0.2 --gap-factor 1 $QS $(truth $M) $V --refine --json $RV/small.$M.json"
+    done | par 1 > /dev/null ;;
+  esac; done ;;
 smoke) # every tool and the whole pipeline once on a 1,058-face terrain: results in $O/smoke
   if [ -n "$SLURM" ]; then # the whole phase as one Slurm job
     { echo "#!/bin/bash"
