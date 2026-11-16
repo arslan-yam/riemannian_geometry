@@ -115,7 +115,7 @@ head("index", "builds (h)", "median", "spread (max / min)")
 for T in ("TJ", "GI"):
     for tag in ("kd", "k64"):
         b = []
-        for p in [os.path.join(R, f"ours.{T}.{tag}.json")] + [os.path.join(RV, f"rep{r}.{T}.{tag}.json") for r in (1, 2)]:
+        for p in [os.path.join(R, f"ours.{T}.{tag}.json")] + ([os.path.join(R, f"caps.{T}.k64.json")] if tag == "k64" else []) + [os.path.join(RV, f"rep{r}.{T}.{tag}.json") for r in (1, 2)]:
             d = J(p)
             if d and d.get("complete", True):
                 b.append(d["build_s"] / 3600)

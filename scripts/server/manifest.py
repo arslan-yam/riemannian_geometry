@@ -35,9 +35,9 @@ ENTRIES = [
     ("proximity", "certified kNN and range", ["prox.*.json", "proxpoi.*.json"], "paper/preprint/server_summary.py"),
     ("POI setting", "P x P table, POI index, UP-Oracle", ["poi.*.json", "upo.*.json"], "paper/preprint/server_summary.py"),
     ("small terrains (cluster reruns)", "the M1 tables rerun on the cluster", ["small.*.json", "ear.GunnisonForest100k.V2V.json"], "paper/preprint/server_summary.py"),
-    ("review: DGG point-to-point, CH, hub labels, kNN", "item 1 and 2", ["review/dgg.*.json", "review/dggch.*.json", "review/dggknn.*.json"], "scripts/server/review_summary.py"),
-    ("review: landmark intervals", "item 3", ["review/landmark.*.json"], "scripts/server/review_summary.py"),
-    ("review: adversarial terrains", "item 5", ["review/adv.*.json", "review/meshes/*.json"], "scripts/server/review_summary.py"),
+    ("review: DGG point-to-point, CH, hub labels, kNN", "item 1 and 2", ["review/dgg.*.json", "review/dggch.*.json", "review/dggpll.*.json", "review/dggknn.*.json"], "scripts/server/review_summary.py, paper/preprint/make_review_tables.py"),
+    ("review: landmark intervals", "item 3", ["review/landmark.*.json", "review/landmark_sets.*.json"], "scripts/server/review_summary.py"),
+    ("review: adversarial terrains", "item 5", ["review/adv.*.json", "review/advvtp.*.json", "review/meshes/*.json"], "scripts/server/review_summary.py"),
     ("review: build repeats and strict checks", "items 4 and 6", ["review/rep*.json", "review/small.*.json"], "scripts/server/review_summary.py"),
 ]
 

@@ -38,13 +38,14 @@ static float f32_up(double x) { float f = (float)x; if ((double)f < x) f = std::
 static const double REL = 1.0 / (1 << 22);  // float32 rounding margin (two rounded-up values)
 
 int main(int argc, char** argv) {
-    if (argc < 4) { std::fprintf(stderr, "usage: landmark_bench mesh.off pairs truth [--L 16,64,256,1024] [--eps 0.2] [--prox P.pairs] [--k 1,10,100] [--refine-sample 100] [--seed 7] [--json out]\n"); return 1; }
-    std::string Ls = "16,64,256,1024", json, prox, ks_s = "1,10,100"; double eps = 0.2; int seed = 7, rsample = 100;
+    if (argc < 4) { std::fprintf(stderr, "usage: landmark_bench mesh.off pairs truth [--L 16,64,256,1024] [--eps 0.2] [--prox P.pairs] [--k 1,10,100] [--refine-sample 100] [--seed 7] [--sets name:pairs:truth,...] [--json out]\n"); return 1; }
+    std::string Ls = "16,64,256,1024", json, prox, ks_s = "1,10,100", sets_s; double eps = 0.2; int seed = 7, rsample = 100;
     for (int i = 4; i + 1 < argc; ++i) {
         std::string a = argv[i]; const char* v = argv[i + 1];
         if (a == "--L") Ls = v; else if (a == "--eps") eps = std::stod(v); else if (a == "--json") json = v;
         else if (a == "--prox") prox = v; else if (a == "--k") ks_s = v; else if (a == "--seed") seed = std::stoi(v);
         else if (a == "--refine-sample") rsample = std::stoi(v);
+        else if (a == "--sets") sets_s = v;  // more vertex-pair sets (near, distance bands): bounds only, no refine
     }
     std::vector<int> Lv; for (double x : parse_list(Ls)) Lv.push_back((int)x);
     std::sort(Lv.begin(), Lv.end());
@@ -59,6 +60,18 @@ int main(int argc, char** argv) {
     { std::ifstream tf(argv[3]); double d; while (tf >> d) tr.push_back(d); }
     if (tr.size() < qp.size()) qp.resize(tr.size());
     const size_t m = qp.size();
+    struct XSet { std::string name; std::vector<std::pair<int, int>> qp; std::vector<double> tr; };
+    std::vector<XSet> xs;
+    for (size_t a = 0; a < sets_s.size();) {
+        size_t b = sets_s.find(',', a); if (b == std::string::npos) b = sets_s.size();
+        std::string it = sets_s.substr(a, b - a); a = b + 1;
+        size_t c1 = it.find(':'), c2 = it.find(':', c1 + 1);
+        XSet X; X.name = it.substr(0, c1);
+        { std::ifstream pf(it.substr(c1 + 1, c2 - c1 - 1)); int s, t; std::string rest; while (pf >> s >> t) { X.qp.push_back({s, t}); std::getline(pf, rest); } }
+        { std::ifstream tf(it.substr(c2 + 1)); double d; while (tf >> d) X.tr.push_back(d); }
+        if (X.tr.size() < X.qp.size()) X.qp.resize(X.tr.size());
+        if (!X.qp.empty()) xs.push_back(std::move(X));
+    }
 
     // ---- landmarks: farthest-point sampling, one full exact sweep each
     std::vector<unsigned> F2(F);
@@ -145,7 +158,22 @@ int main(int argc, char** argv) {
         js << (li ? "," : "") << "{\"L\":" << L << ",\"index_bytes\":" << (long long)n * L * 4 << ",\"build_s\":" << cum_s[L] << ",\"query_us\":" << best * 1e6
            << ",\"sound\":" << (sound ? "true" : "false") << ",\"ub_err_mean\":" << ub_mean << ",\"ub_err_max\":" << ub_max << ",\"lb_err_mean\":" << lb_mean
            << ",\"width_median\":" << widths[m / 2] << ",\"width_p90\":" << widths[(size_t)(0.9 * (m - 1))] << ",\"certified\":" << cert
-           << ",\"refine_ms\":" << 1e3 * rmean << ",\"refine_sample\":" << rn << ",\"end_to_end_ms\":" << 1e3 * e2e << ",\"knn\":[";
+           << ",\"refine_ms\":" << 1e3 * rmean << ",\"refine_sample\":" << rn << ",\"end_to_end_ms\":" << 1e3 * e2e << ",\"sets\":[";
+        for (size_t xi = 0; xi < xs.size(); ++xi) {  // the other sets: soundness, widths, certified at 1+eps, worst UB
+            auto& X = xs[xi]; const size_t mx = X.qp.size();
+            bool xsound = true; int xc = 0; double xub = 0; std::vector<double> w;
+            for (size_t i = 0; i < mx; ++i) {
+                double lo, hi, d = X.tr[i]; bounds(X.qp[i].first, X.qp[i].second, L, lo, hi);
+                if (!(lo <= d * (1 + 1e-9) && d <= hi * (1 + 1e-9))) xsound = false;
+                xub = std::max(xub, hi / d - 1); w.push_back(lo > 0 ? hi / lo - 1 : INFINITY); if (hi <= (1 + eps) * lo) ++xc;
+            }
+            std::sort(w.begin(), w.end());
+            std::printf("  set %s (%zu pairs): sound %s, width median %.3f%% p90 %.3f%% max %.3g, certified %d, UB err max %.3g\n", X.name.c_str(), mx,
+                        xsound ? "yes" : "NO", 100 * w[mx / 2], 100 * w[(size_t)(0.9 * (mx - 1))], w.back(), xc, xub);
+            js << (xi ? "," : "") << "{\"set\":\"" << X.name << "\",\"pairs\":" << mx << ",\"sound\":" << (xsound ? "true" : "false") << ",\"width_median\":" << w[mx / 2]
+               << ",\"width_p90\":" << w[(size_t)(0.9 * (mx - 1))] << ",\"width_max\":" << (std::isfinite(w.back()) ? w.back() : 1e300) << ",\"certified\":" << xc << ",\"ub_err_max\":" << xub << "}";
+        }
+        js << "],\"knn\":[";
 
         // ---- certified kNN over the exported objects
         if (!prox.empty()) {

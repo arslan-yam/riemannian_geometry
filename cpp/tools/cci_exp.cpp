@@ -322,6 +322,11 @@ int main(int argc, char** argv) {
                 t << sets[0].tr[i] << "\n";
             }
         }
+        for (size_t si = 1; si < sets.size(); ++si) {  // the other vertex-pair sets (near, d0..dk, ...): pairs + exact truth
+            std::ofstream pr(export_prefix + "." + sets[si].name + ".pairs"), t(export_prefix + "." + sets[si].name + ".truth");
+            t.precision(17);
+            for (size_t i = 0; i < sets[si].qp.size(); ++i) { pr << sets[si].qp[i].first << " " << sets[si].qp[i].second << "\n"; t << sets[si].tr[i] << "\n"; }
+        }
         if (!aq.empty()) {
             std::ofstream q(export_prefix + ".A2A.query"), t(export_prefix + ".A2A.truth");
             t.precision(17);

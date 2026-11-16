@@ -44,8 +44,9 @@ $O\big((k+\eps^{-1}\log k)\,n\log n\big)$ labels. On the six
 terrains of the UP-Oracle paper with 0.5M faces, \cci answers in 0.5--2.1\,$\mu$s on one core with a mean error of
 0.001--0.03\% in 0.36--0.66\,GB, and answers exact 10-nearest-neighbour queries over 10,000 objects in 0.3--0.5\,ms;
 EAR-Oracle needs 333\,GB and 0.4--1\,s per query for a mean error of 2.6--2.9\%, and DGG, the most accurate
-competitor, 0.3--0.8\,s per query with no per-query bound. Up to 5M faces the capped index grows like $n^{1.14}$.
-All 6.7 million answers we checked lie in their intervals. The same index answers queries between arbitrary
+competitor, 0.12--0.5\,s per query with no per-query bound, or 60--94\,$\mu$s with hub labels of 29--48\,GB on its graph. Up to 5M faces the capped index grows like $n^{1.14}$.
+All 8.5 million answers we checked lie in their intervals, except two where the exact reference solver itself
+is wrong. The same index answers queries between arbitrary
 surface points and extends to terrains with obstacles and, with an upper bound only, to weighted terrains.
 \end{abstract}
 
@@ -76,8 +77,10 @@ up to 25\% against exact geodesics, with indexes of hundreds of megabytes alread
 The most accurate practical method we found is not a terrain oracle at all: DGG~\cite{adikusuma2020fast} builds in
 minutes a sparse graph whose shortest paths approximate geodesics to a relative error of order $\eps$ when the
 vertices are evenly spread, and with $\eps=10^{-4}$ its mean error is about 0.004\%. But DGG answers every query
-with a Dijkstra search on that graph, 0.3--6.9\,s on terrains with 0.5--5M faces, and returns no bound for the
-individual answer. It is a better surface model, not an index; what it lacks is exactly what an index provides.
+with a Dijkstra search on that graph, 0.12--0.51\,s per pair even when the search stops at the target at 0.5M
+faces, and returns no bound for the individual answer. It is a better surface model, not an index. Putting a road-network index on
+its graph does not close the gap: contraction hierarchies stall on its high degree, and hub labels answer in
+60--94\,$\mu$s but need 29--48\,GB and 13--42\,h at 0.5M faces (Section~\ref{sec:server}).
 
 What none of these methods provides is a statement about a single answer. A query operator needs more than a good
 average. A kNN query compares the distances of many candidates, a range query compares each with a radius, and a
@@ -215,7 +218,8 @@ has to be scanned; our labels are distances on the whole surface, so the deepest
 Section~\ref{sec:server}.
 Landmark methods store distances to a few sample points: Xin et al.~\cite{xin2012constant} interpolate them
 in constant time without a bound, and Burghard and Klein~\cite{burghard2015simple} return the triangle-inequality
-lower and upper bounds through the landmarks, whose relative width is not bounded.
+lower and upper bounds through the landmarks, whose relative width is not bounded; we evaluate this baseline in
+Section~\ref{sec:server}.
 
 \paragraph{Distance labels and portals on graphs.}
 Planar graphs have small separators~\cite{lipton1979separator}, and the approximate oracles of
@@ -428,6 +432,11 @@ $d(1\pm10^{-12})$ around one sweep ($10^{-9}$ between arbitrary points). These m
 not the rounding of the solvers, which we have not analysed, so we validate rather than prove: every answer in
 Section~\ref{sec:experiments} is checked against an independent double-precision MMP sweep, and we call it
 certified and correct if $\LB\le d(1+10^{-9})$, $d\le\UB(1+10^{-9})$, and $\UB\le(1+\eps)\LB$ or it was refined.
+The tolerance is far above what we observe. Without it, of the 1.88 million answers of the runs where we count this
+(Section~\ref{sec:server}: build repeats, adversarial terrains, small terrains), 35,403 lie outside the raw
+interval, all by at most $1.2\cdot10^{-13}$ relative; with the default lossless near tables 153, by at most
+$4.5\cdot10^{-16}$, two units in the last place. These are double-precision roundings where a bound coincides with
+the distance, as for a near-table entry or a ratio-coded one that decodes to it.
 
 \subsection{Capped portals and certify-or-refine}
 \label{sec:capped}
@@ -805,17 +814,24 @@ LH) at 0.5M, 1M, 1.5M, 2M and 2.5M faces, and TJ also at 5M faces, on an HPC clu
 (we also report its single-thread CPU query time). The ground truth is exact MMP in double precision. Each terrain
 has 2,000 random vertex pairs (200 sources with 10 targets), 2,000 pairs closer than the near radius, 300 pairs in
 each of up to ten distance bands, and 200 pairs of arbitrary surface points. All methods answer the same 2,000
-random pairs, except DGG, whose searches take up to seconds and which answers the first 200 of them. Ours
+random pairs. DGG answers them twice: with the search of the authors' code, a full Dijkstra from the source, and
+with a search that stops when the target is settled; at 0.5M faces the second is 2.1--2.2 times faster, and we
+report it there (at larger sizes we have only the first). Ours
 uses $\eps=0.2$ and $g=1$ edge unless stated, so its index is smaller than in Table~\ref{tab:main}. Over all runs of
 our index on unweighted terrains on the cluster, we checked 6.67 million answers against the ground truth: about
 0.29 million distinct query pairs, answered by every index variant and storage format. Every answer lies in its
-interval, up to the tolerance of Section~\ref{sec:index}. Our query time is the lookup: the mean over a query set,
+interval, up to the tolerance of Section~\ref{sec:index}. The runs added for this version (build repeats,
+adversarial terrains, small terrains) checked 1.9 million more, with the same result except two answers on a
+terrain where the reference solver fails (Table~\ref{tab:adversarial}). Our query time is the lookup: the mean over a query set,
 best of five passes. Where the capped index refines, we also give the end-to-end mean, timed per query in one
 pass with refines included. Sizes are the byte counts of the stored structures for our index and SEP, the graph file for DGG, and the
 growth of EAR-Oracle's resident memory over its build, as its harness reports it, so they compare in order of
-magnitude only. The nodes are shared with other users' jobs, and two runs
-of the same build can differ in time by up to 1.6 times (11.7 and 17.9\,h for the uncapped TJ index at 0.5M faces);
-where we have repeats, we report the shorter.
+magnitude only. The nodes are shared with other users' jobs, so build times vary. We built the uncapped TJ and GI indexes at
+0.5M faces three times each, in 11.7--12.5\,h (median 12.2) and 11.8--12.5\,h (median 12.3), within 7\% of each
+other, and the cap-64 indexes four times each, in 6.8--10.2\,h (median 7.2) and 7.1--10.2\,h (median 7.8), up to
+1.5 times apart; the builds are deterministic and produce the same labels. An earlier uncapped TJ build took
+17.9\,h. We report the shortest build, the closest to the cost on an unloaded node; the medians are 4\% (uncapped)
+and 6--10\% (cap 64) longer.
 
 \begin{table*}[t]
 \caption{Our index on the six terrains at 0.5M faces (251,001 vertices), $\eps=0.2$, $g=1$, one thread. Errors are
@@ -832,7 +848,7 @@ TJ & 11.7\,h & 1.99 / 0.62\,GB & 1.47\,$\mu$s & 0.0012\% & 0.27\% & 6.8\,h & 358
 SC & 13.2\,h & 1.98 / 0.61\,GB & 1.45\,$\mu$s & 0.0011\% & 0.21\% & 6.8\,h & 357\,MB & 0.54\,$\mu$s & 0.021\% & 1.72\% & 0.39\% & 6.5\%\\
 VS & 19.1\,h & 2.14 / 0.66\,GB & 1.26\,$\mu$s & 0.0012\% & 0.19\% & 11.4\,h & 366\,MB & 0.96\,$\mu$s & 0.029\% & 3.15\% & 0.56\% & 11.6\%\\
 AU & 10.4\,h & 1.93 / 0.60\,GB & 1.29\,$\mu$s & 0.0011\% & 0.15\% & 6.9\,h & 355\,MB & 0.54\,$\mu$s & 0.014\% & 0.67\% & 0.21\% & 4.1\%\\
-GI & 12.3\,h & 2.02 / 0.62\,GB & 1.03\,$\mu$s & 0.0016\% & 0.21\% & 7.8\,h & 359\,MB & 1.54\,$\mu$s & 0.029\% & 4.52\% & 0.44\% & 11.4\%\\
+GI & 11.8\,h & 2.02 / 0.62\,GB & 1.03\,$\mu$s & 0.0016\% & 0.21\% & 7.1\,h & 359\,MB & 1.54\,$\mu$s & 0.029\% & 4.52\% & 0.44\% & 11.4\%\\
 LH & 12.6\,h & 1.95 / 0.61\,GB & 1.87\,$\mu$s & 0.0015\% & 0.30\% & 7.3\,h & 356\,MB & 0.53\,$\mu$s & 0.020\% & 1.84\% & 0.34\% & 9.0\%\\
 \bottomrule
 \end{tabular}
@@ -840,7 +856,8 @@ LH & 12.6\,h & 1.95 / 0.61\,GB & 1.87\,$\mu$s & 0.0015\% & 0.30\% & 7.3\,h & 356
 
 \begin{table}[t]
 \caption{All methods on TJ and GI at 0.5M faces, vertex pairs, one CPU thread. Ours with 8-bit labels. NeuroGF
-trains on a V100 GPU; its query time is on one CPU thread (0.3--0.4\,$\mu$s batched on the GPU). Only ours returns
+trains on a V100 GPU; its query time is on one CPU thread (0.3--0.4\,$\mu$s batched on the GPU). DGG: the search
+stops at the target; with hub labels (pruned landmark labelling) on its graph, build includes the graph. Only ours returns
 a certified bound.}
 \label{tab:server-comp}
 \small
@@ -849,22 +866,25 @@ a certified bound.}
 \toprule
  & method & build & size & query & mean & max\\
 \midrule
-\multirow{10}{*}{TJ} & ours, uncapped & 11.7\,h & 0.62\,GB & 2.1\,$\mu$s & 0.0021\% & 0.28\%\\
+\multirow{12}{*}{TJ} & ours, uncapped & 11.7\,h & 0.62\,GB & 2.1\,$\mu$s & 0.0021\% & 0.28\%\\
  & ours, cap 64 & 6.8\,h & 0.36\,GB & 0.55\,$\mu$s & 0.021\% & 1.16\%\\
  & ours, $\eps=0.1$ & 29.4\,h & 1.1\,GB & 3.0\,$\mu$s & 0.0008\% & 0.055\%\\
  & EAR-Oracle, sp 5 & 17.6\,h & 333\,GB & 426\,ms & 2.61\% & 9.75\%\\
  & EAR-Oracle, sp 7 & 35.4\,h & 468\,GB & 343\,ms & 1.91\% & 6.90\%\\
- & DGG, $10^{-3}$ & 2\,min & 0.76\,GB & 280\,ms & 0.035\% & 0.16\%\\
- & DGG, $10^{-4}$ & 7\,min & 2.4\,GB & 819\,ms & 0.0040\% & 0.036\%\\
+ & DGG, $10^{-3}$ & 2\,min & 0.76\,GB & 121\,ms & 0.034\% & 0.16\%\\
+ & DGG, $10^{-4}$ & 7\,min & 2.4\,GB & 330\,ms & 0.0037\% & 0.036\%\\
+ & + hub labels, $10^{-3}$ & 14.8\,h & 30\,GB & 60\,$\mu$s & 0.034\% & 0.16\%\\
+ & + hub labels, $10^{-4}$ & 41.9\,h & 48\,GB & 94\,$\mu$s & 0.0037\% & 0.036\%\\
  & NeuroGF (800 ep.) & 6.9\,h & 0.25\,MB & 0.39\,ms & 0.36\% & 9.1\%\\
  & SEP (our reimpl.) & 3.1\,h & 228\,MB & 6.5\,$\mu$s & 0.34\% & 2.1\%\\
  & exact VTP & -- & -- & 6.6\,s & 0 & 0\\
 \midrule
-\multirow{8}{*}{GI} & ours, uncapped & 12.3\,h & 0.62\,GB & 1.6\,$\mu$s & 0.0025\% & 0.21\%\\
- & ours, cap 64 & 7.8\,h & 0.36\,GB & 1.5\,$\mu$s & 0.029\% & 4.52\%\\
+\multirow{9}{*}{GI} & ours, uncapped & 11.8\,h & 0.62\,GB & 1.6\,$\mu$s & 0.0025\% & 0.21\%\\
+ & ours, cap 64 & 7.1\,h & 0.36\,GB & 1.5\,$\mu$s & 0.029\% & 4.52\%\\
  & ours, $\eps=0.1$ & 27.5\,h & 1.1\,GB & 3.4\,$\mu$s & 0.0009\% & 0.077\%\\
  & EAR-Oracle, sp 5 & 21.3\,h & 333\,GB & 993\,ms & 2.85\% & 8.46\%\\
- & DGG, $10^{-4}$ & 7\,min & 2.4\,GB & 814\,ms & 0.0036\% & 0.015\%\\
+ & DGG, $10^{-4}$ & 7\,min & 2.4\,GB & 344\,ms & 0.0035\% & 0.034\%\\
+ & + hub labels, $10^{-4}$ & 37.8\,h & 46\,GB & 91\,$\mu$s & 0.0035\% & 0.034\%\\
  & NeuroGF & 3.5\,h & 0.25\,MB & 0.37\,ms & 0.44\% & 11.4\%\\
  & SEP (our reimpl.) & 2.7\,h & 236\,MB & 8.7\,$\mu$s & 0.37\% & 2.8\%\\
  & exact VTP & -- & -- & 6.3\,s & 0 & 0\\
@@ -899,12 +919,27 @@ terrain takes 480\,MB, 1.0\,h and 0.0077\%. So our index is 540--930 times small
 three orders of magnitude lower.
 
 DGG is the strongest competitor in accuracy and build time: its graph builds in minutes, and with $\eps=10^{-4}$ its
-mean error is 0.004\%, comparable to ours. But a DGG query is a Dijkstra search on a graph of 0.8--2.4\,GB and takes
-0.28--0.82\,s, and it returns no per-query bound. At the same size our index is more accurate: with 8-bit labels the
-uncapped index takes 0.62\,GB on TJ for a mean error of 0.0021\%, against DGG's 0.0040\% at 2.4\,GB
+mean error is 0.004\%, comparable to ours. But a DGG query is a Dijkstra search on a graph of 0.8--2.4\,GB. The full
+search of the authors' code takes 0.26--1.1\,s on the six terrains, and stopping at the target 0.12--0.13\,s with
+$\eps=10^{-3}$ and 0.29--0.51\,s with $10^{-4}$. It returns no per-query bound. At the same size our index is more accurate: with 8-bit labels the
+uncapped index takes 0.62\,GB on TJ for a mean error of 0.0021\%, against DGG's 0.0037\% at 2.4\,GB
 (Figure~\ref{fig:server-methods}).
+
+Could a road-network index on DGG's graph close the gap? We tried the two standard ones, on TJ and GI. A
+contraction hierarchy (edge-difference order, witness searches, a core once the mean degree has tripled) stalls: the
+graph has 94 out-edges per vertex with $\eps=10^{-3}$ and 295 with $10^{-4}$, and every contraction adds shortcuts
+among neighbours that are rarely witnessed. With $\eps=10^{-3}$ it contracts 43\% of the vertices in 26--31\,h before
+the core is reached, with $10^{-4}$ only 13\% in 40\,h, and the queries, upward searches into a core of 142,000--219,000
+vertices, are 1.3--1.5 times \emph{slower} than the stopped Dijkstra (6.7 times on one terrain). Hub labels (pruned landmark labelling in degree order, exact
+on the graph) do complete: with $\eps=10^{-3}$ they hold 14,000--15,000 entries per vertex, 29--30\,GB, built in
+13--15\,h with a peak of 82--84\,GB, and with $10^{-4}$ 23,000--24,000 entries, 46--48\,GB, in 38--42\,h and up to
+141\,GB. They answer in 58--94\,$\mu$s with DGG's accuracy. Against them our uncapped index with 8-bit labels is 48--77 times
+smaller, builds faster (11.7--11.8\,h), answers 30--60 times faster, is more accurate than even the $\eps=10^{-4}$
+graph (0.0021--0.0025\% against 0.0035--0.0037\%), and certifies every answer. So the gap is not the missing index: DGG's graph has more than 90 edges per vertex, and
+labels on it grow with that density, while our labels are distances on the surface itself, sampled only where a
+shortest path can cross a cut.
 We see DGG and our index as answering different needs:
-DGG is the better choice for a handful of queries on a terrain that will not be queried again, ours when the terrain is
+DGG is the better choice for a few thousand queries on a terrain that will not be queried again, ours when the terrain is
 queried many times, needs answers in microseconds, or needs a bound on each answer.
 NeuroGF is the smallest index by far, 0.25\,MB of network weights, but its mean error is 0.2--0.6\% and single
 pairs are off by 4--13\%, with no indication of which. We checked that this is not an artefact of our setup.
@@ -920,14 +955,49 @@ takes 265\,MB, builds in 3.3--3.6\,h and answers in 0.6\,$\mu$s with a mean erro
 a certified interval for every answer (Figure~\ref{fig:server-methods}). Same-leaf pairs, which SEP answers with the Euclidean distance, did not occur among
 the 2,000 pairs.
 
+\begin{table*}[t]
+\caption{Exact-landmark intervals against our index on TJ and GI at 0.5M faces, one thread. Each vertex stores its
+exact distances (float32) to $L$ landmarks chosen by farthest-point sampling; the interval is
+$\max(|S-T|,\max_\ell|d_\ell(s)-d_\ell(t)|)\le d\le\min_\ell d_\ell(s)+d_\ell(t)$. Median width $\UB/\LB-1$ on the near
+pairs, two distance bands (d2: chart distance 2--4 near radii, d4: 8--16) and the random pairs; certified: the share
+of the 6,421 vertex pairs of all sets with $\UB\le1.2\LB$ without a refine; worst: the largest $(\UB-d)/d$. All
+intervals of both methods contain $d$.}
+\label{tab:landmarks}
+\small
+\begin{tabular}{@{}llrrr|rrrr|rr@{}}
+\toprule
+ & & & & & \multicolumn{4}{c|}{median width} & & \\
+ & method & size & build & lookup & near & d2 & d4 & random & certified & worst UB\\
+\midrule
+\input{tab_landmarks}
+\end{tabular}
+\end{table*}
+
+\paragraph{Exact-landmark intervals.}
+The simplest certified alternative stores, for every vertex, its exact distances to $L$ landmarks and returns the
+triangle-inequality interval through them, as Burghard and Klein do on meshes~\cite{burghard2015simple} and ALT
+does on road networks~\cite{goldberg2005computing}. Built with one exact sweep per landmark, it is fast to build
+and tight for far pairs (Table~\ref{tab:landmarks}): with $L=256$ (257\,MB, under half an hour) the median width on
+the random pairs is 0.07--0.09\%, against 2.0\% for our cap-64 index of similar size, and with $L=1{,}024$ it is
+0.01\%. But its width is not bounded, and it fails exactly where a proximity query needs it. For close pairs
+neither bound is useful: the upper bound goes through a landmark that is far from both points, and the lower
+bound sees two nearly equal distances. On the near pairs the median width is 620--640\% with 256 landmarks and
+260--270\% with 1,024, fewer than 4\% of them are certified at $1+\eps=1.2$, and the upper bound can be 23--50 times
+the distance; with 256 landmarks the median width falls below 2\% only from 8--16 near radii on. Over all vertex pairs, 54--60\% are certified, against
+99.98--100\% for ours, so the landmark index has to refine about half of a mixed workload, at 15--80\,ms per exact
+sweep, and 98--100\% of its kNN queries (see below). Our index costs more to build because it buys the bound
+everywhere: near pairs are exact, and every interval has $\UB\le(1+\eps)\LB$ or is refined.
+
 \paragraph{When the build pays off.}
-Our build takes hours where DGG's takes minutes, but it is amortised quickly. With cap 64 at 0.5M faces
+Our build takes hours where DGG's takes minutes, but it is amortised. With cap 64 at 0.5M faces
 it pays for itself after 3,700--4,500 queries compared with answering every query by an exact VTP sweep, and after
-30,000--34,000 queries compared with DGG ($\eps=10^{-4}$, including DGG's own build); the uncapped index after
-6,400--7,100 and 51,000--54,000 queries. At 2.5M faces the capped index breaks even after 7,800--8,100 queries
+51,000--127,000 queries compared with DGG's stopped search ($\eps=10^{-4}$, including DGG's own build; 23,000--58,000
+against its full search); the uncapped index after 6,400--7,100 and 88,000--215,000 queries. At 2.5M faces, where we
+have only DGG's full search, the capped index breaks even after 7,800--8,100 queries
 against VTP and 49,000 against DGG; the uncapped index built on one thread (110--125\,h) after 16,600--19,600 and
 106,000, and built on 32 threads (15.7\,h) after 2,400 and 14,800. At 5M faces, where a VTP sweep takes 74\,s and a
-DGG query 6.9\,s, the capped index built on 32 threads (12.0\,h) breaks even after 590 and 5,700 queries.
+full DGG query 6.9\,s, the capped index built on 32 threads (12.0\,h) breaks even after 590 and 5,700 queries; if the
+stopped search is 2.2 times faster there as at 0.5M, these counts against DGG roughly double.
 Against EAR-Oracle there is no break-even point: its build is longer and each of its queries slower. A single kNN
 query over 10,000 objects asks for up to 10,000 distances, so one batch of proximity queries, or the queries of a
 route planner over a day, already exceeds these counts.
@@ -1053,6 +1123,52 @@ times as long as the disks (24--25\,h uncapped and 19--20\,h capped, against 8--
 build depends less on the obstacles: it takes 11--18\,h, so on the disks our build is 1.3--2.2 times faster than EAR's,
 but on the walls 1.1--1.5 times slower (16.5--17.4\,h for EAR).
 
+\begin{table*}[t]
+\caption{Adversarial variants of TJ at 0.5M faces, $\eps=0.2$, $g=1$, one thread: the quantities of the capped
+theorem pushed up one at a time. Slope: median / 99th percentile of the face slope in degrees; aspect: 99th
+percentile of longest edge over height. Errors over the 2,000 random vertex pairs; sizes in GB (uncapped float32 /
+8-bit). DGG with $\eps=10^{-4}$, search stopped at the target. Every answer of our index is certified and correct
+against the reference, except on \emph{cluster}, where the reference fails (see text).}
+\label{tab:adversarial}
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}ll rrr|rrrr|rrrr|rr@{}}
+\toprule
+ & & & & & \multicolumn{4}{c|}{ours, uncapped} & \multicolumn{4}{c|}{ours, cap 64, 8-bit} & \multicolumn{2}{c}{DGG}\\
+mesh & change & $n$ & slope & aspect & build & size & mean & max & build & size & mean & max & query & mean\\
+\midrule
+\input{tab_adversarial}
+\end{tabular}
+\end{table*}
+
+\paragraph{Adversarial terrains.}
+The capped theorem holds under bounded slope and detour, and its terms grow with the slope ($\lambda$ falls), the
+window ratio $\kappa_C$ and the number of runs $r_C$ in which a shortest path crosses a cut. To see how the index
+degrades when these grow, we built it on seven variants of TJ at 0.5M faces (Table~\ref{tab:adversarial}):
+heights scaled by 5 and 10 (median slopes of 63$^\circ$ and 76$^\circ$ instead of 22$^\circ$), the chart stretched by 10
+in $x$ (every triangle a sliver of aspect 10), needle triangles (alternating grid columns 0.05 and 1.95 apart,
+aspect up to 43), heights rounded to 5\,m (129 distinct heights, many exact ties between paths), 90\% of the points
+in 20 Gaussian clusters with 200 near-coincident pairs $10^{-4}$ apart (edges from $10^{-3}$ to 5,000), and 40 thin
+walls that alternate between the two sides of the terrain, so that a shortest path across it zig-zags through a
+comb and crosses many cuts several times.
+
+Every answer stays certified and correct, and the accuracy barely moves: the uncapped mean error is
+0.0012--0.0040\% on every variant, against 0.0012\% on TJ. What the adversarial geometry costs is the build and
+the size, as the theorem predicts. With heights $\times5$, the windows and ellipses grow with $1/\lambda$: the
+uncapped index stores 1.76 times as many labels (3.4\,GB) and builds in 27.8\,h instead of 11.7\,h, and the capped
+index builds in 20\,h, keeps its size bounded by the cap (0.44\,GB), and its mean error (8-bit) rises from 0.021\% to
+0.069\%, with 8 refines over the 6,621 pairs of all query sets. Slivers and needles do not enlarge the index or its errors
+and lengthen the build by at most 1.4 times; ties make it faster (more coplanar faces for the exact sweeps). DGG keeps its accuracy on every variant, at 0.09--0.44\,s per query.
+
+On \emph{cluster} the exact MMP sweeps themselves fail. Its degenerate faces (aspect ratios up to 30,000) make MMP
+miss one or two vertices from a typical source and return distances up to $7\cdot10^{-4}$ too long at a few others,
+which VTP, the other exact solver, does not show. Two answers of the capped index fall outside the MMP reference by
+more than the tolerance, and they are the only ones in all our runs that do: a target MMP never reached, for which
+VTP gives 4,452.04 and our upper bound is 4,452.4, and a pair for which MMP is $3.2\cdot10^{-4}$ too long, by more than
+the $1.05\cdot10^{-4}$ our upper bound lies below it. We leave the unreached pair out of the error statistics of this
+row. Because our labels on this terrain are MMP sweeps too, a clean test needs VTP for both labels and reference; we
+report that run, which is in progress, separately.
+
 \paragraph{kNN and range queries in the POI setting.}
 UP-Oracle's own workload asks for distances between points of interest, and we ran kNN ($k=1,10,25$) and range
 queries (radius 1, 3 and 10\% of the chart diagonal) from 20 of them over all others, with their POI files of 50,
@@ -1075,6 +1191,12 @@ intervals cannot separate, in 0--2\% of the queries for $k=1$ and 13--22\% for $
 average): 24--158\,$\mu$s for $k=1$ and 0.3--0.5\,ms for $k=10$. An on-the-fly search from the query point that stops
 once the $k$ nearest objects are settled, pruned by chart distances, takes 1.2--1.9\,ms and 3.8--7.0\,ms, and a full
 sweep 2.7--3.2\,s. At 2.5M faces, $k=10$ takes 0.4\,ms approximately and 2.5\,ms exactly, against an 11\,s sweep.
+DGG's Dijkstra stopped once $k$ objects are settled is the fastest uncertified alternative: on the six terrains it
+answers $k=10$ in 0.19--0.23\,ms with $\eps=10^{-3}$ (0.43--0.47\,ms with $10^{-4}$) with a recall of 99.8--100\%,
+about as fast as our exact mode, and range queries in 0.1--11\,ms by radius, but it cannot say which answers are
+wrong. Landmark intervals (Table~\ref{tab:landmarks}) decide kNN by the same rules as ours, but their intervals are too loose
+for it: with 256 landmarks, 57 objects per query remain undecided for $k=10$ and every query needs a sweep, 28\,ms
+end to end, and with 1,024 landmarks 23 objects and 41\,ms, since computing the 10,000 intervals alone takes 35\,ms.
 
 \paragraph{The small terrains on the cluster.}
 Rerunning the small-terrain configurations of Table~\ref{tab:main} on the cluster gives the same picture: on
@@ -1102,8 +1224,8 @@ situation & method\\
 \midrule
 a few queries, terrain not queried again & exact VTP sweep, or DGG for a few hundred (no bound)\\
 distances among a fixed set of up to $\sim$2,500 POIs & exact $P\times P$ table, one sweep per POI\\
-$10^3$--$10^5$ queries, no bound needed & DGG: builds in minutes, 0.3--7\,s per query\\
-beyond 590--19,600 queries (vs.\ VTP) or 5,700--106,000 (vs.\ DGG) & \cci: microsecond answers\\
+$10^3$--$10^5$ queries, no bound needed & DGG: builds in minutes, 0.1--7\,s per query\\
+beyond 590--19,600 queries (vs.\ VTP) or 5,700--215,000 (vs.\ DGG) & \cci: microsecond answers\\
 a bound on each answer, or exact kNN and range & \cci, with refine for undecided pairs\\
 memory-bound index & \cci with cap 64: near-linear size\\
 terrain that changes & on-the-fly sweeps; UP-Oracle for POIs\\
@@ -1124,11 +1246,13 @@ asymptotically smaller in theory. In floating point the guarantees are validated
 The build is dominated by one exact sweep per portal. Uncapped it grows like $n^{1.5}$, takes 96--110\,h on one
 thread at 2M faces and 110--125\,h at 2.5M faces (15.7\,h on 32 threads); capped it
 takes 51--52\,h at 2.5M faces. Paths that detour around walls make it 2.5 times longer. The build is the price of the certificate and of microsecond queries, and it is recovered after roughly
-600--106,000 queries, depending on the terrain size, the variant and the alternative.
+600--215,000 queries, depending on the terrain size, the variant and the alternative.
 
 \paragraph{Slopes and weights.}
 $\lambda$ enters the near radius, the window and the ellipse, and a small $w_{\min}$ widens all three. Steep
-slopes raise $\sigma_C$ and lengthen the capped tails. On weighted terrains we certify only the upper bound.
+slopes raise $\sigma_C$ and lengthen the capped tails: with heights scaled by 5 (median slope 63$^\circ$) the
+uncapped index stores 1.8 times as many labels and builds 2.4 times as long, though its answers stay as accurate
+(Table~\ref{tab:adversarial}). On weighted terrains we certify only the upper bound.
 
 \paragraph{Static terrains.}
 The index is static. Terrains that change, the setting of UP-Oracle, would need the affected cuts rebuilt.
