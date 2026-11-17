@@ -22,7 +22,7 @@
 // usage: proximity mesh.off [--eps 0.2] [--gap-factor 1] [--kmax K] [--store code8] [--near-store sym]
 //        [--threads 1] [--objects 10000 | --poi-file f] [--queries 100] [--k 1,10,100]
 //        [--radius 0.01,0.03,0.1] (fractions of the chart diagonal) [--seed 7] [--truth-cache f] [--json out.json]
-//        [--queries-from-objects] [--poi-index] [--export prefix] [--export-only]
+//        [--queries-from-objects] [--poi-index] [--export prefix] [--export-only] [--dump-pairs out.txt]
 // POI workloads (the setting of UP-Oracle): --queries-from-objects draws the query vertices among the objects
 // (a query is then one of the objects, at distance 0: kNN asks internally for k + 1 and reports k);
 // --poi-index indexes the objects only (Options::poi); --export writes prefix.pairs, one line
@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
     Options opt; opt.eps = 0.2; opt.gap_factor = 1;
     int M = 10000, Q = 100, seed = 7;
     bool profile = false, from_objects = false, poi_index = false;
-    std::string export_prefix;
+    std::string export_prefix, dump_pairs;
     bool export_only = false;  // --export-only: write the pairs (from the truth cache) and stop, no index
     for (int i = 2; i < argc; ++i) {
         std::string a = argv[i];
@@ -81,6 +81,7 @@ int main(int argc, char** argv) {
         else if (a == "--poi-index") poi_index = true;
         else if (a == "--export") export_prefix = nx();
         else if (a == "--export-only") export_only = true;
+        else if (a == "--dump-pairs") dump_pairs = nx();  // LB UB estimate of every exported pair, same order
     }
     std::vector<double> V; std::vector<unsigned> F;
     read_off(mesh, V, F);
@@ -163,6 +164,15 @@ int main(int argc, char** argv) {
     auto t0 = clk::now();
     CertifiedIndex ix(T, opt);
     double tb = since(t0);
+    if (!dump_pairs.empty()) { // the decision workload: one line "LB UB estimate" per (query, other object) pair
+        std::ofstream o(dump_pairs); char buf[96]; double b3[3];
+        for (int i = 0; i < Q; ++i)
+            for (int j = 0; j < M; ++j) if (obj[j] != qv[i]) {
+                ix.bounds(qv[i], obj[j], b3);
+                std::snprintf(buf, sizeof buf, "%.12g %.12g %.12g\n", b3[0], b3[1], b3[2]); o << buf;
+            }
+        std::printf("dumped the intervals of the exported pairs to %s\n", dump_pairs.c_str());
+    }
     // object grid (chart coordinates)
     std::vector<double> oxy(2 * M);
     for (int j = 0; j < M; ++j) { oxy[2 * j] = T.xy[2 * obj[j]]; oxy[2 * j + 1] = T.xy[2 * obj[j] + 1]; }
@@ -187,6 +197,7 @@ int main(int argc, char** argv) {
                 mesh.c_str(), T.n, M, Q, tb, ix.nbytes() / 1e6, sweep_mean * 1e3);
 
     struct Cand { int j; double lb, ub, est; };
+    long long n_cap_refines = 0; // capped index: uncertified candidates refined before the approximate answer
     auto pct = [](std::vector<double> v, double p) { std::sort(v.begin(), v.end()); return v.empty() ? 0.0 : v[(size_t)(p * (v.size() - 1))]; };
     // ---------------------------------------------------------------- kNN
     bool firstk = true;
@@ -241,6 +252,10 @@ int main(int argc, char** argv) {
             for (int j : more)
                 if (!have[j]) { ix.bounds(q, obj[j], o3); C.push_back({j, o3[0], o3[1], o3[2]}); prof_calls++; }
             prof_bounds += since(p0);
+            // capped index: an interval that is not certified (UB > (1 + eps) LB) is refined first if its object
+            // may be among the k nearest (LB <= tau), so every true top-k object has UB <= (1 + eps) d
+            for (auto& c : C)
+                if (c.ub > (1 + ix.eps) * c.lb && c.lb <= tau) { double e = ix.exact_pair(q, obj[c.j], c.ub); c.lb = c.ub = c.est = e; n_cap_refines++; }
             const double t_cand = since(c0);
             {   // certified approximate kNN: the k candidates of smallest UB
                 std::vector<std::pair<double, int>> us;
@@ -366,6 +381,7 @@ int main(int argc, char** argv) {
             std::vector<int> ub_in; // certified approximate: UB <= r
             for (int j : og.radius(T.xy[2 * q], T.xy[2 * q + 1], r / lam)) {
                 ix.bounds(q, obj[j], o3);
+                if (o3[1] > (1 + ix.eps) * o3[0] && o3[0] <= r / (1 + ix.eps)) { o3[0] = o3[1] = o3[2] = ix.exact_pair(q, obj[j], o3[1]); n_cap_refines++; } // capped: certify first
                 est_list.push_back({j, o3[2]});
                 if (o3[1] <= r) ub_in.push_back(j);
                 if (o3[1] <= r) answer.push_back(j);
@@ -436,7 +452,7 @@ int main(int argc, char** argv) {
         firstr = false;
         flush(1);
     }
-    js << "],\"complete\":true}";
+    js << "],\"cap_refines\":" << n_cap_refines << ",\"complete\":true}";
     flush(2);
     return 0;
 }

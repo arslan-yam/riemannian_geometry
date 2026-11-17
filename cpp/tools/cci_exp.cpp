@@ -49,6 +49,8 @@ int main(int argc, char** argv) {
     std::string poi_file, near_variants, near_truth_cache, export_prefix, interp_variants, weights_file;
     int truth_steiner = 0;
     bool refine = false, poi_table = false, truth_only = false, detour_sets = false;
+    long long timing_pairs = 0;
+    bool tail_delta = false;
     for (int i = 2; i < argc; ++i) {
         std::string a = argv[i];
         auto nx = [&]() { return std::string(argv[++i]); };
@@ -59,6 +61,9 @@ int main(int argc, char** argv) {
         else if (a == "--hierarchy") opt.hierarchy = nx();
         else if (a == "--copies") opt.copies = std::stoi(nx());
         else if (a == "--kmax") opt.k_max = std::stoi(nx());
+        else if (a == "--tail-eps") { std::string v = nx(); tail_delta = v == "delta"; if (!tail_delta) opt.tail_eps = std::stod(v); }  // or "delta": eps / (2 + eps)
+        else if (a == "--cross-check") opt.cross_check = std::stod(nx());   // fraction of cuts swept by both exact solvers
+        else if (a == "--timing-pairs") timing_pairs = std::stoll(nx());    // + latency over this many independent random pairs
         else if (a == "--refine") refine = true;
         else if (a == "--variants") variants = nx();
         else if (a == "--pairs") pairs_file = nx();
@@ -399,6 +404,7 @@ int main(int argc, char** argv) {
     const std::string near_build = opt.near_store;
     if (nlist.size() > 1 || nlist[0] != opt.near_store) opt.near_store = "dense";
     auto t0 = clk::now();
+    if (tail_delta) opt.tail_eps = opt.eps / (2 + opt.eps);
     CertifiedIndex ix(T, opt);
     double tb = since(t0);
     double rss = peak_rss_mb();
@@ -411,17 +417,31 @@ int main(int argc, char** argv) {
        << ",\"threads\":" << opt.threads << ",\"store\":\"" << opt.store << "\",\"near_store\":\"" << near_build
        << "\",\"pois\":" << opt.poi.size() << ",\"peak_rss_mb\":" << rss << table_js
        << ",\"build_s\":" << tb << ",\"cuts\":" << ix.cuts.size() << ",\"portals\":" << ix.portals() << ",\"labels\":" << ix.labels()
-       << ",\"near_entries\":" << ix.near_total << ",\"timing\":{";
+       << ",\"near_entries\":" << ix.near_total << ",\"tail_eps\":" << (opt.tail_eps > 0 ? opt.tail_eps : opt.eps) << ",\"cross_check\":" << opt.cross_check << ",\"cc_sweeps\":" << ix.cc_sweeps
+       << ",\"cc_labels\":" << ix.cc_labels << ",\"cc_disagree\":" << ix.cc_disagree << ",\"cc_disagree_sweeps\":" << ix.cc_disagree_sweeps
+       << ",\"cc_unreached\":" << ix.cc_unreached << ",\"cc_max_rel\":" << ix.cc_max_rel << ",\"timing\":{";
     bool first = true;
     for (auto& kv : ix.timing) { js << (first ? "" : ",") << "\"" << kv.first << "\":" << kv.second; first = false; }
     js << "},\"variants\":[";
     // the JSON is rewritten after every result (and once right after the build), so a job that dies
     // or times out keeps what it measured; "complete" says whether it finished
+    std::ostringstream rlog;  // every refined pair of the first variant: d against the cut's gap and the chord
+    int rlog_n = 0; bool rlog_on = true;
+    std::ostringstream ind;  // latency over independent random pairs, one entry per variant (--timing-pairs)
     auto flush = [&](bool done) {
         if (json.empty()) return;
         std::ofstream f(json);
-        f << js.str() << "],\"complete\":" << (done ? "true" : "false") << "}\n";
+        f << js.str() << "],\"indep\":[" << ind.str() << "],\"refined_pairs\":[" << rlog.str() << "],\"complete\":" << (done ? "true" : "false") << "}\n";
     };
+    // independent random vertex pairs (no source reused as in the query sets): one pass for the mean without
+    // per-query clocks, a second set timed per query (p50 / p99 / max); every pair is new, so with an index far
+    // larger than the caches nearly every lookup misses them
+    std::vector<std::pair<int, int>> tpa, tpb;
+    if (timing_pairs > 0) {
+        std::mt19937_64 rng(seed + 99);
+        for (auto* v : {&tpa, &tpb})
+            while ((long long)v->size() < timing_pairs) { int a = (int)(rng() % T.n), b = (int)(rng() % T.n); if (a != b) v->push_back({a, b}); }
+    }
     flush(false);
     bool firstv = true;
     for (const auto& nv : nlist) {
@@ -516,9 +536,42 @@ int main(int argc, char** argv) {
                 bool r = refine ? ix.bounds_refined(Q[i].first, Q[i].second, &B[3 * i]) : (ix.bounds(Q[i].first, Q[i].second, &B[3 * i]), false);
                 qt[i] = since(q0);
                 refined += r;
+                if (r && rlog_on && rlog_n < 5000) { // the refine-locality theorem: a refined pair has d < g_C / delta
+                    int cid = ix.answering_cut(Q[i].first, Q[i].second);
+                    const double dch = std::hypot(T.xy[2 * Q[i].first] - T.xy[2 * Q[i].second], T.xy[2 * Q[i].first + 1] - T.xy[2 * Q[i].second + 1]);
+                    const double gC = cid >= 0 ? ix.cuts[cid].gap_box : 0;
+                    rlog << (rlog_n++ ? "," : "") << "{\"set\":\"" << S.name << "\",\"s\":" << Q[i].first << ",\"t\":" << Q[i].second << ",\"d\":" << S.tr[i]
+                         << ",\"cut\":" << cid << ",\"g_C\":" << gC << ",\"capped\":" << (gC > ix.g * (1 + 1e-9) ? "true" : "false")
+                         << ",\"d_over_gC\":" << (gC > 0 ? S.tr[i] / gC : 0) << ",\"d_over_chart\":" << S.tr[i] / (ix.lam * dch) << "}";
+                }
             }
             report(S.name, B, S.tr, qt, refined, best, S.lo, S.hi);
             (void)sink;
+        }
+        rlog_on = false;  // refines are the same for every storage variant up to rounding: log the first only
+        if (timing_pairs > 0) {
+            double o[3], sink = 0;
+            auto q0 = clk::now();
+            for (auto& p : tpa) { ix.bounds(p.first, p.second, o); sink += o[2]; }
+            const double batch = since(q0) / tpa.size();
+            std::vector<double> qt(tpb.size());
+            long long unc = 0;
+            for (size_t i = 0; i < tpb.size(); ++i) {
+                auto q1 = clk::now();
+                ix.bounds(tpb[i].first, tpb[i].second, o);
+                qt[i] = since(q1);
+                unc += o[1] > (1 + opt.eps) * o[0];  // would be refined by certify-or-refine
+                sink += o[2];
+            }
+            std::sort(qt.begin(), qt.end());
+            const size_t m = qt.size();
+            std::printf("%-14s independent pairs %lld: single pass %.3f us; per query p50 %.3f p99 %.3f max %.1f us; uncertified %lld\n", vname.c_str(),
+                        timing_pairs, batch * 1e6, qt[m / 2] * 1e6, qt[(size_t)(0.99 * (m - 1))] * 1e6, qt[m - 1] * 1e6, unc);
+            ind << (ind.tellp() > 0 ? "," : "") << "{\"variant\":\"" << vname << "\",\"n_pairs\":" << timing_pairs << ",\"query_us_single_pass\":" << batch * 1e6
+                << ",\"query_us_p50\":" << qt[m / 2] * 1e6 << ",\"query_us_p99\":" << qt[(size_t)(0.99 * (m - 1))] * 1e6 << ",\"query_us_max\":" << qt[m - 1] * 1e6
+                << ",\"uncertified\":" << unc << ",\"index_bytes\":" << ix.nbytes() << "}";
+            flush(false);
+            if (sink == 12345.678) std::printf(" ");
         }
         if (!aq.empty()) { // A2A: always certified (exact below the near radius, refine when wider than 1 + 2 eps)
             const size_t ma = aq.size();

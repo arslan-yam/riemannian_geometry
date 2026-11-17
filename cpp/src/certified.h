@@ -95,6 +95,12 @@ struct Options {
     std::string store = "dense";    // dense | code16 | code8: code each cut's labels as soon as it is built
                                     // and drop its float32 labels (peak memory ~ the coded index)
     std::vector<int> poi;           // POI mode: index only these vertices (queries between them); empty = all
+    double tail_eps = 0;            // tail spacing max(g, 2 tail_eps lambda c) outside the box (0 = eps); the
+                                    // refine-locality theorem takes eps / (2 + eps)
+    double cross_check = 0;         // this fraction of the cuts (every 1/F-th) repeats its label sweeps with the
+                                    // other exact solver (VTP <-> MMP): disagreements are counted and the label
+                                    // is the smaller value (a failing exact solver returns a too-long distance
+                                    // or none, never a too-short one); 1 = every cut (dual-solver labels)
     std::string near_store = "sym";  // dense | sym | sym16 | sym8: near tables as built (int32 id + float32),
                                     // or each pair once with varint id deltas and the float32 distance (sym,
                                     // lossless) or a 16 / 8-bit code of its ratio to the chord, rounded up
@@ -137,6 +143,10 @@ class CertifiedIndex {
     std::map<std::string, double> timing;
     std::unique_ptr<SteinerGraph> sg; // weighted terrains (solver steiner): one graph for every label search
     int64_t sweeps_mmp = 0, sweeps_vtp = 0;
+    // cross-check (Options::cross_check): sweeps repeated, labels compared, labels that differ by more than
+    // 1e-9 relative (or one solver did not reach), sweeps with such a label, largest finite relative difference
+    int64_t cc_sweeps = 0, cc_labels = 0, cc_disagree = 0, cc_disagree_sweeps = 0, cc_unreached = 0;
+    double cc_max_rel = 0;
     mutable std::atomic<int64_t> mmp_fallbacks{0}; // exact = vtp: sweeps that fell back to MMP (VTP rejected the sub-mesh)
 
     std::vector<int32_t> slot_of;    // vertex -> row in anc / row / depth_of / near tables (-1: not indexed)

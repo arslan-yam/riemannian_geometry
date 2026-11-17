@@ -130,3 +130,18 @@ for p in sorted(glob.glob(os.path.join(RV, "adv.*.json")) + glob.glob(os.path.jo
         continue
     sv, mv, n = strict(d); tot += n; viol += sv; mx = max(mx, mv); nfiles += 1
 print(f"{nfiles} runs, {tot} answers, {viol} outside the raw interval, largest relative violation {mx:.2e}")
+
+print("\n## 7. Follow-up: independent-pair latency, solver cross-check, delta tails (TJ, GI, 0.5M faces)\n")
+head("run", "build (h)", "size (MB, 8-bit)", "1M pairs: mean / p50 / p99 (us)", "uncertified", "cross-check: sweeps / disagree / max rel", "refined pairs: max d/g_C")
+for p in sorted(glob.glob(os.path.join(RV, "fu.*.json")) + glob.glob(os.path.join(RV, "advvtp.*.k64cc.json"))):
+    d = J(p)
+    if not d:
+        continue
+    ind = next((x for x in d.get("indep", []) if x["variant"].startswith("code8")), None)
+    v8 = var(d, "code8/sym")
+    lat = f"{ind['query_us_single_pass']:.2f} / {ind['query_us_p50']:.2f} / {ind['query_us_p99']:.2f}" if ind else "--"
+    cc = f"{d['cc_sweeps']} / {d['cc_disagree']} / {d['cc_max_rel']:.1e}" if d.get("cross_check") else "--"
+    rp = d.get("refined_pairs", [])
+    rmax = f"{max(x['d_over_gC'] for x in rp):.2f} (n={len(rp)}, 1/delta={(2 + d['eps']) / d['eps'] if d.get('tail_eps', d['eps']) < d['eps'] else 1 / d['eps']:.1f})" if rp else "none"
+    row(os.path.basename(p)[:-5], f"{d['build_s'] / 3600:.1f}" + ("" if d.get("complete", True) else " (running)"),
+        f"{v8['index_bytes'] / 1e6:.0f}" if v8 else "--", lat, ind["uncertified"] if ind else "--", cc, rmax)

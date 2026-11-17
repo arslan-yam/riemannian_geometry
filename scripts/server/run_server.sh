@@ -148,6 +148,7 @@ res() { # Slurm resources of one job, by its name: cores, memory, time limit, GP
     rv.adv.ours.*|rv.advvtp.ours.*) m=48G;  t=8-00:00:00 ;;
     rv.advvtp.truth)       m=16G;           t=2-00:00:00 ;;  # steep terrains: larger sub-meshes, longer builds
     rv.rep*)               m=16G;           t=4-00:00:00 ;;
+    rv.fu.*)               m=32G;           t=4-00:00:00 ;;  # cross-check: two solvers in memory
     rv.small.*)            m=8G;            t=1-00:00:00 ;;
     *)                     m=$((16 * k))G;  t=3-00:00:00 ;;
   esac
@@ -466,7 +467,9 @@ review) # the experiments asked by the November 2026 review, results in $O/revie
         #  landmark  exact-landmark intervals, 16 to 2,048 landmarks, TJ and GI: V2V pairs and certified kNN (item 3)
         #  adv       adversarial variants of TJ at 0.5M faces (scripts/competitors/make_adversarial.py, comb walls):
         #            truth, our index uncapped and cap 64, DGG 1e-4 (item 5)
-        #  advvtp    (not in the default list) the cluster terrain with VTP labels and reference (--exact vtp)
+        #  advvtp    (not in the default list) the cluster terrain with VTP labels and reference (--exact vtp), and
+        #            with MMP labels cross-checked by VTP (--cross-check 1)
+        #  followup  (not in the default list) independent-pair latency, solver cross-check, delta tails (TJ, GI)
         #  repeats   two more builds of our TJ and GI indexes (uncapped, cap 64) for the build-time spread, with the
         #            strict (tolerance-free) soundness counters of cci_exp (items 4, 6)
         #  small     the small terrains again with the strict counters (item 4)
@@ -512,7 +515,18 @@ review) # the experiments asked by the November 2026 review, results in $O/revie
     M=TJadv_cluster; F=$IN/$M.off; TV="--exact vtp --truth-cache $O/truth/$M.vtp.s200x10"
     a2=$(echo "run rv.advvtp.truth $RX $F --eps 0.2 --gap-factor 1 $QS $TV --export $O/comp/$M.vtp --truth-only" | par 1)
     { echo "run rv.advvtp.ours.kd $RX $F --eps 0.2 --gap-factor 1 $QS $TV $V --refine --json $RV/advvtp.cluster.kd.json"
-      echo "run rv.advvtp.ours.k64 $RX $F --eps 0.2 --gap-factor 1 --kmax 64 $QS $TV $V --refine --json $RV/advvtp.cluster.k64.json"; } | DEP=$a2 par $JOBS > /dev/null ;;
+      echo "run rv.advvtp.ours.k64 $RX $F --eps 0.2 --gap-factor 1 --kmax 64 $QS $TV $V --refine --json $RV/advvtp.cluster.k64.json"
+      # MMP labels, every sweep repeated with VTP (the minimum is kept): checked against the VTP reference
+      echo "run rv.advvtp.ours.cc $RX $F --eps 0.2 --gap-factor 1 --kmax 64 $QS --truth-cache $O/truth/$M.vtp.s200x10 --cross-check 1 $V --refine --json $RV/advvtp.cluster.k64cc.json"; } | DEP=$a2 par $JOBS > /dev/null ;;
+  followup) # (not in the default list) TJ and GI again: latency over 1M independent random pairs, one cut in 20
+            # swept by both exact solvers, and cap 64 / cap 16 with delta tails (the refine-locality theorem; every
+            # refined pair is logged with d / g_C)
+    for T in TJ GI; do F=$IN/${T}pre_500000.off; R2="$QS $(truth ${T}pre_500000) $V --refine --timing-pairs 1000000"
+      echo "run rv.fu.$T.kd $RX $F --eps 0.2 --gap-factor 1 $R2 --cross-check 0.05 --json $RV/fu.$T.kd.json"
+      echo "run rv.fu.$T.k64 $RX $F --eps 0.2 --gap-factor 1 --kmax 64 $R2 --cross-check 0.05 --json $RV/fu.$T.k64.json"
+      echo "run rv.fu.$T.k64d $RX $F --eps 0.2 --gap-factor 1 --kmax 64 --tail-eps delta $R2 --json $RV/fu.$T.k64d.json"
+      echo "run rv.fu.$T.k16d $RX $F --eps 0.2 --gap-factor 1 --kmax 16 --tail-eps delta $R2 --json $RV/fu.$T.k16d.json"
+    done | par $JOBS > /dev/null ;;
   repeats)
     for r in 1 2; do for T in TJ GI; do F=$IN/${T}pre_500000.off; R2="$QS $(truth ${T}pre_500000)"
       echo "run rv.rep$r.$T.kd $RX $F --eps 0.2 --gap-factor 1 $R2 $V --refine --json $RV/rep$r.$T.kd.json"

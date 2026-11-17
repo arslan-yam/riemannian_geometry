@@ -38,6 +38,7 @@ ENTRIES = [
     ("review: DGG point-to-point, CH, hub labels, kNN", "item 1 and 2", ["review/dgg.*.json", "review/dggch.*.json", "review/dggpll.*.json", "review/dggknn.*.json"], "scripts/server/review_summary.py, paper/preprint/make_review_tables.py"),
     ("review: landmark intervals", "item 3", ["review/landmark.*.json", "review/landmark_sets.*.json"], "scripts/server/review_summary.py"),
     ("review: adversarial terrains", "item 5", ["review/adv.*.json", "review/advvtp.*.json", "review/meshes/*.json"], "scripts/server/review_summary.py"),
+    ("follow-up: independent-pair latency, solver cross-check, delta tails", "Sections 4.4, 6.9", ["review/fu.*.json"], "scripts/server/review_summary.py"),
     ("review: build repeats and strict checks", "items 4 and 6", ["review/rep*.json", "review/small.*.json"], "scripts/server/review_summary.py"),
 ]
 

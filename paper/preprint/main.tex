@@ -5,6 +5,7 @@
 
 \usepackage{booktabs}
 \usepackage{multirow}
+\usepackage{array}
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta,decorations.pathreplacing,calc}
 \usepackage{algorithm}
@@ -27,27 +28,24 @@
 \affiliation{\institution{Affiliation}\country{}}
 
 \begin{abstract}
-Shortest-path distances on terrain surfaces underlie nearest-neighbour, range and route queries in
-geographic information systems, robotics and planning. Exact geodesic algorithms take seconds per pair on large
-terrains, and the distance oracles proposed for terrains answer faster but approximately, without saying how wrong a
-given answer is. We present the Certified Cut Index (\cci), a terrain distance oracle whose every answer is a
-certified interval: a query returns an estimate together with $\LB\le d\le\UB$, where $d$ is the exact surface
-distance, $(1-\eps)d\le\LB$ and $\UB\le(1+\eps)d$ (proved in exact arithmetic, and validated for our floating-point
-implementation against an exact solver). The interval adapts to the query, with a median width of 0.36\%
-at $\eps=0.2$, and it makes the oracle a database operator: kNN and range queries are decided from the intervals,
-and only the candidates the intervals cannot separate are computed exactly. Every vertex stores exact geodesic
-distances to portals sampled on the straight cut lines of a kd hierarchy over the terrain. A window lemma lets us
-sample the cuts instead of storing them whole, an ellipse lemma makes every label an exact geodesic computed on a
-small sub-mesh, and the 1-Lipschitz label rows give the lower bound. A capped variant with certify-or-refine answers
-every query with a certificate or exactly, and on terrains of bounded slope and detour stores
-$O\big((k+\eps^{-1}\log k)\,n\log n\big)$ labels. On the six
-terrains of the UP-Oracle paper with 0.5M faces, \cci answers in 0.5--2.1\,$\mu$s on one core with a mean error of
-0.001--0.03\% in 0.36--0.66\,GB, and answers exact 10-nearest-neighbour queries over 10,000 objects in 0.3--0.5\,ms;
-EAR-Oracle needs 333\,GB and 0.4--1\,s per query for a mean error of 2.6--2.9\%, and DGG, the most accurate
-competitor, 0.12--0.5\,s per query with no per-query bound, or 60--94\,$\mu$s with hub labels of 29--48\,GB on its graph. Up to 5M faces the capped index grows like $n^{1.14}$.
-All 8.5 million answers we checked lie in their intervals, except two where the exact reference solver itself
-is wrong. The same index answers queries between arbitrary
-surface points and extends to terrains with obstacles and, with an upper bound only, to weighted terrains.
+Shortest-path distances on terrain surfaces underlie nearest-neighbour, range and route queries in geographic
+information systems, robotics and planning. Exact geodesic algorithms take seconds per pair on large terrains, and
+the distance oracles proposed for terrains answer faster but approximately, without saying how wrong a given
+answer is. We present the Certified Cut Index (\cci), to our knowledge the first implemented terrain distance index whose
+every answer carries a two-sided bound that adapts to the query and is guaranteed within $1\pm\eps$: a query returns an estimate together with $\LB\le d\le\UB$, where $d$
+is the exact surface distance, $(1-\eps)d\le\LB$ and $\UB\le(1+\eps)d$, proved in exact arithmetic and validated in
+floating point against exact solvers. The interval adapts to the query and is usually far narrower than $\eps$, so
+kNN and range queries are decided from the intervals and only the undecided candidates are computed exactly. Every
+vertex stores exact geodesic distances to portals sampled on the straight cut lines of a kd hierarchy: a window
+lemma bounds where a shortest path can cross a cut, an ellipse lemma makes every label an exact geodesic on a small
+sub-mesh, and the 1-Lipschitz label rows give the lower bound. A capped variant answers with a certificate or
+exactly, refines only pairs close to a capped cut, and on terrains of bounded slope and detour stores
+$O\big((k+\eps^{-1}\log k)\,n\log n\big)$ labels plus $O(\eps^{-2})$ near-table entries per vertex. On six terrains
+with 0.5M faces, \cci answers in 0.5--2\,$\mu$s on one core with a mean error of 0.001--0.03\% in 0.36--0.66\,GB;
+EAR-Oracle needs 0.4--1\,s and 333\,GB, and hub labels on the graph of DGG, the most accurate competitor,
+60--94\,$\mu$s and 29--48\,GB, both without a per-query bound. All 8.5 million answers we checked lie in their
+intervals, except two where the exact reference solver itself is wrong. The index also answers queries between
+arbitrary surface points, handles obstacles, and gives an upper bound on weighted terrains.
 \end{abstract}
 
 \maketitle
@@ -142,18 +140,24 @@ Let $T$ be a terrain, $\eps\in(0,1)$ and $g>0$, and let the labels be exact geod
 them on unweighted terrains. In exact arithmetic, for every pair of vertices the index returns $\LB\le d\le\UB$
 with $(1-\eps)d\le\LB$ and $\UB\le(1+\eps)d$, in time linear in the depth of the hierarchy and the number of
 portals of one cut. With at most $k$ portals per cut inside the region, every answer satisfies
-$\UB\le(1+\eps)\LB$ or is computed exactly, and on terrains of bounded slope and detour without obstacles the
-index stores $O\big((k+\eps^{-1}\log k)\,n\log n\big)$ labels. Between arbitrary surface points,
-$\UB\le(1+2\eps)\LB$.
+$\UB\le(1+\eps)\LB$ or is computed exactly, and on terrains of bounded slope, detour and vertex density without
+obstacles the index stores $O\big((k+\eps^{-1}\log k)\,n\log n\big)$ labels and $O(\eps^{-2})$ exact near-table entries
+per vertex for a fixed gap $g$. Built with tails at $\eps/(2+\eps)$, it refines only pairs close to a capped cut, with
+a local sweep. Between arbitrary surface points, $\UB\le(1+2\eps)\LB$.
 \end{headline}
 
-Our contributions are as follows:
-(i) a certified-interval distance oracle for terrains and its $(1+\eps)$ guarantee, built on a window lemma that
-bounds where a shortest path can cross a straight cut, an ellipse lemma that makes labels computable exactly on small
-sub-meshes, and a lower bound read from the 1-Lipschitz label rows (Section~\ref{sec:index});
-(ii) certified kNN and range queries that decide from the intervals and refine exactly only what they cannot decide,
-and a capped variant with certify-or-refine whose labels are near-linear in $n$ under stated geometric assumptions
-(Sections~\ref{sec:capped}, \ref{sec:a2a} and~\ref{sec:engineering});
+Our main contribution is, to our knowledge, the first implemented terrain distance index whose every answer
+between two vertices or two surface points carries an interval that contains the exact surface distance, lies within
+$1\pm\eps$ of it and adapts to the query, with $\UB/\LB\le1+\eps$ or an exact answer. Lower and upper bounds on
+terrain distances exist (Section~\ref{sec:related}), but either with no bound on their width or, when implied by a
+$(1+\eps)$ oracle, with the fixed width $\eps$. Three ingredients make it work, and each is needed: a window lemma that bounds
+where a shortest path can cross a straight cut, so a cut is sampled rather than stored; an ellipse lemma that makes
+every label an exact geodesic computed on a small sub-mesh; and a lower bound read from the 1-Lipschitz label rows
+(Section~\ref{sec:index}). Around it we contribute:
+(i) its guarantees: the $(1\pm\eps)$ interval, and for the capped variant certify-or-refine with near-linear labels
+and a refine-locality theorem under stated geometric assumptions (Sections~\ref{sec:capped} and~\ref{sec:a2a});
+(ii) certified kNN and range queries that decide from the intervals and refine exactly only what they cannot decide
+(Section~\ref{sec:engineering});
 (iii) engineering that keeps the bounds sound while making the index fast and compact: hybrid exact sweeps,
 closed-loop 8/16-bit label coding and a parallel build with bit-identical labels (Section~\ref{sec:engineering});
 (iv) an extension to terrains with obstacles, with the same certificate, and to weighted terrains, with an
@@ -164,6 +168,30 @@ run on the same machine and the same queries, on terrains from 800 vertices to 5
 
 \section{Related work}
 \label{sec:related}
+
+\begin{table}[t]
+\caption{How \cci differs from the closest indexes. Scanned: the separators or landmarks a query reads.}
+\label{tab:delta}
+\footnotesize
+\setlength{\tabcolsep}{2pt}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1\columnwidth}}
+\begin{tabular}{@{}L{0.16}L{0.18}L{0.21}L{0.12}L{0.17}L{0.13}@{}}
+\toprule
+index & separators & labels & lower bound & guarantee & scanned\\
+\midrule
+Thorup~\cite{thorup2004compact} & shortest paths (planar graph) & graph distances to $O(1/\eps)$ portals & -- & $1+\eps$ on the graph & ancestor separators\\
+Djidjev--Sommer~\cite{djidjev2011approximate} & shortest paths (Steiner graph) & Steiner-graph distances & -- & $1+\eps$ on the surface & ancestor separators\\
+H2H~\cite{ouyang2018hierarchy} & vertex separators (tree decomposition) & exact graph distances & -- & exact on the graph & one bag\\
+SEP~\cite{gotsman2022compressing} & curves on the mesh & polynomial fits, per patch & -- & none enforced & all ancestors\\
+EAR-Oracle~\cite{huang2023ear} & one uniform grid & Steiner-graph distances, highway nodes & -- & $(1+\eps)(d+2\delta)$ & Dijkstra on highways\\
+landmarks~\cite{burghard2015simple} & -- & exact surface distances to $L$ points & triangle ineq. & unbounded width & all $L$\\
+\cci & straight kd cuts, windowed & exact surface geodesics to sampled portals & 1-Lipschitz rows, chord & certified $1\pm\eps$ per query & deepest cut\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:delta} summarises how \cci differs from the indexes closest to it; the paragraphs below give the
+details.
 
 \paragraph{Exact and approximate geodesics.}
 MMP~\cite{mitchell1987discrete} computes single-source geodesics exactly by propagating windows of constant
@@ -214,7 +242,10 @@ suggests axis-parallel cuts as an alternative. Its distances are low-degree poly
 are sampled on a fixed grid, and pairs in the same leaf use the Euclidean distance. Its error bound holds only
 if every fit is accurate everywhere, which the method does not enforce, and it reports mean errors of
 0.1--0.4\% on meshes of up to 5k vertices. Because its distances are restricted to patches, every ancestor curve
-has to be scanned; our labels are distances on the whole surface, so the deepest separating cut suffices. We reimplemented SEP over exact VTP sweeps (its code is not public) and compare against it in
+has to be scanned; our labels are distances on the whole surface, so the deepest separating cut suffices. In short, \cci keeps SEP's layout and makes four changes: straight cuts sampled where the window lemma says a path
+can cross, instead of separator curves sampled on a fixed grid; exact geodesics on the whole surface instead of
+per-patch fits; one cut per query instead of all ancestors; and a lower bound, so that every answer is checked
+rather than trusted. We reimplemented SEP over exact VTP sweeps (its code is not public) and compare against it in
 Section~\ref{sec:server}.
 Landmark methods store distances to a few sample points: Xin et al.~\cite{xin2012constant} interpolate them
 in constant time without a bound, and Burghard and Klein~\cite{burghard2015simple} return the triangle-inequality
@@ -427,7 +458,9 @@ than $\eps$.
 
 \paragraph{What is certified in floating point.}
 The theorems assume exact labels and arithmetic. We compute labels in double precision, store them as float32
-rounded up, and lower the lower bounds by the matching margin of $2^{-22}$; a refined pair returns
+rounded up, and lower every stored label by the matching margin of $2^{-22}$ before it enters a lower bound. (The runs
+reported here lowered the finished bound by that margin instead, which falls short when an arc gap is large against
+the bound; the strict counts below show that this never mattered, and our code now uses the label margin.) a refined pair returns
 $d(1\pm10^{-12})$ around one sweep ($10^{-9}$ between arbitrary points). These margins cover the storage rounding,
 not the rounding of the solvers, which we have not analysed, so we validate rather than prove: every answer in
 Section~\ref{sec:experiments} is checked against an independent double-precision MMP sweep, and we call it
@@ -437,6 +470,18 @@ The tolerance is far above what we observe. Without it, of the 1.88 million answ
 interval, all by at most $1.2\cdot10^{-13}$ relative; with the default lossless near tables 153, by at most
 $4.5\cdot10^{-16}$, two units in the last place. These are double-precision roundings where a bound coincides with
 the distance, as for a near-table entry or a ratio-coded one that decodes to it.
+
+\paragraph{Cross-checking the solvers.}
+The labels are only as exact as the solvers, and on degenerate meshes the solvers fail. On the clustered terrain
+of Table~\ref{tab:adversarial}, with corner angles below $10^{-5}$, below which Kirsanov's MMP is documented to be
+unreliable, MMP misses vertices and returns distances up to $7\cdot10^{-4}$ too long. Both solvers fail in this
+direction, by missing a path, so the build can sweep a chosen fraction of the cuts with both MMP and VTP, keep the
+smaller value at each target and count the disagreements. On Gunnison10k with every cut checked, the two solvers
+disagree on 2 of 6.76 million labels, by at most $3\cdot10^{-8}$ relative. On a clustered variant of Gunnison10k
+built the same way, they disagree in 344 of 83,744 sweeps, on 642 labels, by up to 8.3\%, and one of them leaves
+36 labels unreached. Keeping the smaller value, all 1,000 random pairs of the capped index lie in their intervals.
+That reference is MMP itself; the cluster run of Table~\ref{tab:adversarial} checks against VTP. Checking every cut doubles the sweeps. Checking one cut in 20 costs about 5\%, and at this rate of
+failure it would still flag the mesh.
 
 \subsection{Capped portals and certify-or-refine}
 \label{sec:capped}
@@ -458,11 +503,30 @@ $\sum_u\sum_{C\ni u}|P_C|$ labels and $\sum_u|N_R(u)|$ near-table entries, where
 chart distance $R$ of $u$. If $\sigma_C/\lambda$, $\kappa_C$ and $r_C$ are bounded, as on terrains of bounded
 slope and detour without obstacles, the labels hold $O\big((k+\eps^{-1}\log k)\,n\log n\big)$ entries.
 \end{theorem}
-Obstacles can add many runs, and clustered vertices large near tables; the theorem counts both. The acceptance
-test is stricter than the worst case of Theorem~\ref{thm:main}, which gives only $\UB/\LB\le(1+\eps)/(1-\eps)$.
-Building with $\delta=\eps/(2+\eps)$ in place of $\eps$, so that $(1+\delta)/(1-\delta)=1+\eps$, would confine refines
-to pairs closer than $g_C/\delta$ across a capped cut. We build with $\eps$ and measure how often the refine runs
-(Section~\ref{sec:server}): with cap 64, for no random pair.
+Obstacles can add many runs, and clustered vertices large near tables; the theorem counts both. The near tables
+hold $O(\rho g^2/(\eps\lambda)^2)$ entries per vertex for vertex density $\rho$, independent of $n$ and of the cap.
+The acceptance test is stricter than the worst case of Theorem~\ref{thm:main}, which gives only
+$\UB/\LB\le(1+\eps)/(1-\eps)$. Building the tails with $\delta=\eps/(2+\eps)$ in place of $\eps$, so that
+$(1+\delta)/(1-\delta)=1+\eps$, closes this gap, and then the refines are local. Let
+$w_C=g_C/(\delta\lambda)$ and $\beta=\max_C\sigma_C/(\lambda k\delta)$.
+\begin{theorem}[refine locality]
+\label{thm:locality}
+Under the assumptions of Theorem~\ref{thm:main}, let the capped index have tail gaps $\max(g_C,2\delta\lambda c)$.
+A non-near pair answered at cut $C$ is refined only if $d(s,t)<g_C/\delta$. Then $s$ and $t$ lie within chart
+distance $w_C$ of the cut line and of each other, and the refine sweeps the faces meeting a chart box of side less
+than $(2+\delta)w_C$. If every chart square of side $r\ge g$ holds at most $\rho_{\max}r^2$ vertices and every box
+of the hierarchy at least $\rho_{\min}$ times its area, at most $\pi(\rho_{\max}/\rho_{\min})^2\beta^3n^2$ vertex
+pairs are refined at capped cuts; at the other cuts, $g_C=g$, so only pairs within chart distance $(2+\eps)R$.
+\end{theorem}
+The proof (Appendix~\ref{app:proofs}) shows $\UB\le d+m$ and $\LB\ge d-m$ with $m=\max(g_C,\delta d)$. Only capped
+cuts, where $g_C>g$, refine pairs with $d\ge g/\delta$; the refinable fraction falls like $k^{-3}$; and a refine
+sweeps a neighbourhood of the cut of width $O(w_C)$, not the terrain. Theorem~\ref{thm:capped} holds with $\delta$
+in place of $\eps$, so the tails hold at most $2+\eps$ times as many portals. The count is loose, because a pair close to a capped cut is
+usually accepted anyway: $\LB$ also takes the chord $\lambda|S-T|$, which is within $1+\eps$ of $d$ unless the path
+detours. On Gunnison10k with $\eps=0.1$ and cap 8, $\delta$ tails make the index 2\% larger, and all 14 refined
+pairs out of 1,000 have $d\le4.8\,g_C$, against the bound $21\,g_C$. Building the tails with $\eps$ refines the same
+14 pairs, so our other runs use $\eps$ tails, and we measure how often the refine runs (Section~\ref{sec:server}):
+with cap 64, for no random pair.
 
 \subsection{Arbitrary surface points}
 \label{sec:a2a}
@@ -541,18 +605,27 @@ $D=|PQ|(1+c\,q)$ with the least code $c$ that is not below the true distance.
 
 \paragraph{Parallel build.}
 The top cuts spread their portals over the threads and the remaining cuts go one per thread. The labels are
-bit-identical to a single-threaded build, two threads give a $2.0\times$ speed-up, and the peak memory is
-about the coded index size because rows are coded as soon as a cut is done. A memory gate bounds the solvers
-alive at once. All timings in this paper use one thread.
+bit-identical to a single-threaded build, and the peak memory is about the coded index size because rows are coded as
+soon as a cut is done. A memory gate bounds the solvers alive at once. The uncapped build of the 2.5M-face TJ takes
+110\,h on one thread, 24.6\,h on 8 threads ($4.5\times$), 16.0\,h on 16 ($6.9\times$) and 15.7\,h on 32. The ceiling is
+not idle threads: from 16 to 32 threads the CPU time grows 2.7-fold for the same wall time, so the extra threads
+most likely contend for memory bandwidth (the exact sweeps chase pointers through large window lists, and the node has two
+sockets), while at 16 threads the cores are busy 72\% of the time, and we attribute the idle rest to the few large top-cut
+sweeps. Query
+timings always use one thread, and build timings do unless stated.
 
 \paragraph{Certified proximity queries.}
 For a kNN or range query from $s$ over a set of objects, the index gives an interval for each candidate. An
 object whose $\UB$ is below the $k$-th smallest $\LB$ is in the answer, one whose $\LB$ exceeds the $k$-th
 smallest $\UB$ is not, and only the ambiguous ones need an exact sweep from $s$, which we run once for all of
 them on an ellipse sub-mesh. Without that sweep, returning the $k$ objects of smallest $\UB$ is a certified
-$\eps$-approximate kNN: every returned object has $d\le(1+\eps)d_k$, with $d_k$ the true $k$-th distance.
-Likewise, the objects with $\UB\le r$ form a range answer with no false positives that contains every object
-within $r/(1+\eps)$.
+$\eps$-approximate kNN: every returned object has $d\le(1+\eps)d_k$, with $d_k$ the true $k$-th distance, because
+each of the true $k$ nearest objects has $\UB\le(1+\eps)d\le(1+\eps)d_k$. Likewise, the objects with $\UB\le r$ form
+a range answer with no false positives that contains every object within $r/(1+\eps)$. Both need
+$\UB\le(1+\eps)d$, which Theorem~\ref{thm:main} gives for the uncapped index. With the capped index, a candidate
+whose interval fails the acceptance test is refined first if it could matter, that is if its $\LB$ is at most the
+$k$-th smallest $\UB$ (kNN) or at most $r/(1+\eps)$ (range); then $\UB\le(1+\eps)\LB\le(1+\eps)d$ or the distance
+is exact for every object the guarantee needs. Our proximity experiments use the uncapped index.
 
 \paragraph{Weighted terrains.}
 Exact weighted geodesics have no practical algorithm, so on weighted terrains the labels are distances in a
@@ -571,8 +644,8 @@ broken by holes gives several runs, each bracketed by portals at its ends; and t
 within chart radius $R$ with its exact distance, including pairs close in the chart but separated by a wall.
 One practical point matters. Where two holes touch at a single vertex the mesh is no longer a manifold, and
 there Kirsanov's MMP returned distances up to 5\% too long, longer than a path in a Steiner graph. We
-therefore separate touching holes by keeping the largest fan of faces at such vertices; on the cleaned pilot
-meshes MMP and VTP agree to $10^{-15}$.
+therefore separate touching holes by keeping the largest fan of faces at such vertices; on the cleaned obstacle
+meshes of Gunnison10k MMP and VTP agree to $10^{-15}$.
 
 \paragraph{Two defects in VTP.}
 On the cluster meshes, VTP as released returned distances up to 3\% too long at a few vertices, longer than a path
@@ -613,8 +686,10 @@ VTP on the fly.
 
 \begin{table*}[t]
 \caption{Vertex-to-vertex queries, one thread. Ours: $\eps=0.1$, $g=0.5$ edges, hybrid sweeps, float32 labels.
-Columns: build time / index size / query time / mean error / maximum error. Every answer of ours is certified
-and correct ($\LB\le d\le\UB$ on all pairs); none of the other methods returns a bound.}
+Columns: build time / index size / query time / mean error / maximum error. Ours, DGG and VTP: 1,500 random vertex
+pairs; EAR-Oracle ($\eps=0.2$, 5 Steiner points per edge): the 100 pairs of its harness, 5\,cm inside a face, and its
+size is the growth of its resident memory. Every answer of ours is certified and correct ($\LB\le d\le\UB$ on all
+pairs); none of the other methods returns a bound.}
 \label{tab:main}
 \small
 \begin{tabular}{@{}lrllll@{}}
@@ -643,14 +718,19 @@ Section~\ref{sec:server}.}
 Table~\ref{tab:main} and Figure~\ref{fig:methods} compare the methods.
 
 \paragraph{Query time.}
-\cci answers in 0.18--0.36\,$\mu$s. EAR-Oracle takes 1.3--10.2\,ms, so we are 7,000--28,000 times faster, and
+\cci answers in 0.18--0.36\,$\mu$s, the mean of the best of five passes over the query set. Repeated passes keep
+the labels a query set touches in cache, so we also timed one pass over 100,000 independent random pairs on
+Gunnison10k: the mean is 0.51\,$\mu$s instead of 0.32\,$\mu$s, the median 0.42\,$\mu$s and the 99th percentile
+0.96\,$\mu$s. EAR-Oracle takes 1.3--10.2\,ms, so we are 7,000--28,000 times faster, and
 DGG, which runs Dijkstra on its graph, takes 1.4--22\,ms. An exact VTP sweep per query costs 3.1--59\,ms, and
 K-Algo and the on-the-fly Steiner schemes are slower still (Figure~\ref{fig:methods}).
 
 \paragraph{Accuracy.}
 With $\eps=0.1$ our mean error is 0.0076--0.024\% and the maximum 0.37--1.79\%, while EAR-Oracle has a mean
 error of 3.1--3.5\% and a maximum of 6.4--24.5\%. Its nominal $\eps$ is relative to its Steiner graph, and the
-Steiner graph with 5 points per edge is itself about 3\% longer than the surface. Increasing the number of
+Steiner graph with 5 points per edge is itself about 3\% longer than the surface: on the same 100 pairs, an
+exact search on that Steiner graph (the harness's FixedS) has the same mean error, 3.2\% on BigMount, so a smaller
+$\eps$ than its default of 0.2 would not help. Increasing the number of
 Steiner points to 10 and 20 on HorseMount lowers EAR-Oracle's mean error only to 2.5\% and 2.3\%, at 541 and
 683\,MB. SE-Oracle reaches 0.81\% on HorseMount but already needs 1.7\,h of build and 942\,MB
 at its 793 vertices, so on the larger terrains we compare against EAR-Oracle, its successor from the same group. DGG is the most accurate
@@ -758,7 +838,7 @@ error of 0.38\% with 5 points per edge and 0.23\% with 10.
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig_obstacles.pdf}
-\caption{The obstacle meshes of the pilot on Gunnison10k. The faces inside the obstacles are removed.}
+\caption{The obstacle meshes on Gunnison10k. The faces inside the obstacles are removed.}
 \label{fig:obstacles}
 \end{figure}
 
@@ -778,7 +858,7 @@ six walls & 131\,s & 0.032\% & 2.2\% & yes & 208\\
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:obstacles} gives a pilot on Gunnison10k with the obstacles of Figure~\ref{fig:obstacles}. Every
+Table~\ref{tab:obstacles} gives the results on Gunnison10k with the obstacles of Figure~\ref{fig:obstacles}. Every
 answer is certified and correct, uncapped and capped, over random, near, distance-band and A2A pairs, including
 the 208 pairs whose shortest path on the walls mesh is at least 20\% longer than the straight line. The mean error
 is 0.03--0.04\%, as without obstacles. On the walls mesh EAR-Oracle has a mean error of 3.59\% and a maximum of
@@ -820,8 +900,8 @@ report it there (at larger sizes we have only the first). Ours
 uses $\eps=0.2$ and $g=1$ edge unless stated, so its index is smaller than in Table~\ref{tab:main}. Over all runs of
 our index on unweighted terrains on the cluster, we checked 6.67 million answers against the ground truth: about
 0.29 million distinct query pairs, answered by every index variant and storage format. Every answer lies in its
-interval, up to the tolerance of Section~\ref{sec:index}. The runs added for this version (build repeats,
-adversarial terrains, small terrains) checked 1.9 million more, with the same result except two answers on a
+interval, up to the tolerance of Section~\ref{sec:index}. The build repeats, the adversarial terrains and the
+small terrains rerun on the cluster checked 1.9 million more, with the same result except two answers on a
 terrain where the reference solver fails (Table~\ref{tab:adversarial}). Our query time is the lookup: the mean over a query set,
 best of five passes. Where the capped index refines, we also give the end-to-end mean, timed per query in one
 pass with refines included. Sizes are the byte counts of the stored structures for our index and SEP, the graph file for DGG, and the
@@ -1021,7 +1101,7 @@ weighted index certifies only the upper bound.
 \begin{table}[t]
 \caption{Scaling on TJ, one thread: uncapped index (float32) and cap 64 (float32; 8-bit in brackets), against
 DGG ($\eps=10^{-4}$) and an exact VTP sweep per query. Mean errors are over 2,000 random vertex pairs.
-$^b$The 5M-face terrain, resampled from the 2.5M-face grid on the same surface; built on 32 threads.}
+$^b$The 5M-face terrain, resampled from the 2.5M-face grid on the same surface (no added relief); built on 32 threads.}
 \label{tab:scale}
 \small
 \setlength{\tabcolsep}{2.5pt}
@@ -1057,11 +1137,13 @@ index takes 6.0\,GB (2.1\,GB with 8-bit codes) at 1.25M vertices, and the build 
 takes 51--52\,h. The query time stays at 0.3--1.2\,$\mu$s capped and grows to 3.0--3.3\,$\mu$s at 1M vertices
 uncapped, while the mean error does not grow: it falls from 0.0012--0.0016\% to 0.0007--0.0008\% uncapped and stays
 at 0.019--0.027\% capped. All answers at every size are certified and correct. The parallel build of the uncapped
-index on the 2.5M-face TJ takes 24.6, 16.0 and 15.7\,h with 8, 16 and 32 threads, with identical labels; the
-speed-up flattens beyond 16 threads, where the top cuts, whose sweeps run on large sub-meshes, dominate.
+index on the 2.5M-face TJ takes 24.6, 16.0 and 15.7\,h with 8, 16 and 32 threads, with identical labels, against
+110\,h on one; beyond 16 threads the speed-up flattens at $7\times$ because of memory contention
+(Section~\ref{sec:engineering}).
 
 To see whether the capped index keeps scaling, we resampled the 2.5M-face TJ grid to 5M faces (2.51M vertices) on
-the same surface, adding no relief. Built on 32 threads in 12.0\,h, the capped index takes 12.9\,GB, or 4.7\,GB with
+the same surface, adding no relief. This tests how the index grows with the number of vertices at a fixed relief,
+not how it behaves on a finer real terrain, which we do not have at this resolution. Built on 32 threads in 12.0\,h, the capped index takes 12.9\,GB, or 4.7\,GB with
 8-bit codes, 2.15 times its size at 2.5M faces, in line with $n^{1.1}$. It answers in 0.34\,$\mu$s (0.52\,$\mu$s
 with 8-bit codes) with a mean error of 0.019\% and a maximum of 1.3\%, without a single exact refine, and all
 answers, over every query set, are certified and correct. On this terrain DGG with $\eps=10^{-4}$ builds a 23.6\,GB
@@ -1191,10 +1273,16 @@ intervals cannot separate, in 0--2\% of the queries for $k=1$ and 13--22\% for $
 average): 24--158\,$\mu$s for $k=1$ and 0.3--0.5\,ms for $k=10$. An on-the-fly search from the query point that stops
 once the $k$ nearest objects are settled, pruned by chart distances, takes 1.2--1.9\,ms and 3.8--7.0\,ms, and a full
 sweep 2.7--3.2\,s. At 2.5M faces, $k=10$ takes 0.4\,ms approximately and 2.5\,ms exactly, against an 11\,s sweep.
-DGG's Dijkstra stopped once $k$ objects are settled is the fastest uncertified alternative: on the six terrains it
-answers $k=10$ in 0.19--0.23\,ms with $\eps=10^{-3}$ (0.43--0.47\,ms with $10^{-4}$) with a recall of 99.8--100\%,
-about as fast as our exact mode, and range queries in 0.1--11\,ms by radius, but it cannot say which answers are
-wrong. Landmark intervals (Table~\ref{tab:landmarks}) decide kNN by the same rules as ours, but their intervals are too loose
+DGG's Dijkstra stopped once $k$ objects are settled is the strongest uncertified alternative. With
+$\eps=10^{-3}$ it answers $k=1$, 10 and 100 in 0.03, 0.19--0.23 and 1.9--2.2\,ms with a recall of at least 99.8\%,
+and range queries of radius 1, 3 and 10\% of the diagonal in 0.12, 1.0 and 10.5--11.5\,ms (2.2--2.6 times as long
+with $10^{-4}$). Our certified-approximate mode is faster except for $k=1$: 60--169\,$\mu$s for $k=10$, 0.4--2.0\,ms
+for $k=100$, and 0.9--1.2\,ms for the 10\% range, 9--12 times faster than DGG, and each answer is proved: $d\le(1+\eps)d_k$
+for every returned neighbour, and no false positive and no miss within $r/(1+\eps)$ in a range. Our exact mode is the slow one when the answer is large. It refines the
+undecided objects with one sweep, which takes 32--54\,ms for $k=100$ and 0.5\,s for the 10\% range, where DGG's
+recall is 99.9\% but unproved. So for exact answers over many objects per query a graph search is the better tool,
+and the index pays where each answer must carry a bound that $\eps$ satisfies, or where many queries each ask
+for a few objects. Landmark intervals (Table~\ref{tab:landmarks}) decide kNN by the same rules as ours, but their intervals are too loose
 for it: with 256 landmarks, 57 objects per query remain undecided for $k=10$ and every query needs a sweep, 28\,ms
 end to end, and with 1,024 landmarks 23 objects and 41\,ms, since computing the 10,000 intervals alone takes 35\,ms.
 
@@ -1238,14 +1326,15 @@ terrain that changes & on-the-fly sweeps; UP-Oracle for POIs\\
 \paragraph{Asymptotic size.}
 The uncapped index stores $\Theta(n^{1.5})$ labels, as the top cuts have $\Theta(\sqrt n)$ portals and every vertex
 stores them. The capped variant is near-linear only for bounded slope, detour and number of runs, its accuracy
-relies on an exact refine that our analysis does not confine to close pairs, and Djidjev and Sommer's oracle is
-asymptotically smaller in theory. In floating point the guarantees are validated, not proved
+relies on an exact refine. Theorem~\ref{thm:locality} confines it to pairs close to a capped cut and makes it a
+local sweep, but bounds the number of such pairs only under density assumptions, and loosely. Djidjev and Sommer's
+oracle is asymptotically smaller in theory. In floating point the guarantees are validated, not proved
 (Section~\ref{sec:index}).
 
 \paragraph{Build.}
-The build is dominated by one exact sweep per portal. Uncapped it grows like $n^{1.5}$, takes 96--110\,h on one
-thread at 2M faces and 110--125\,h at 2.5M faces (15.7\,h on 32 threads); capped it
-takes 51--52\,h at 2.5M faces. Paths that detour around walls make it 2.5 times longer. The build is the price of the certificate and of microsecond queries, and it is recovered after roughly
+The build is dominated by one exact sweep per portal. Uncapped it grows like $n^{1.5}$: at 2.5M faces it takes
+16\,h on 16 threads and 110--125\,h on one; capped it takes 51--52\,h on one thread at 2.5M faces, and 12\,h on 32
+threads at 5M faces. The parallel build stops scaling at about 16 threads. Paths that detour around walls make it 2.5 times longer. The build is the price of the certificate and of microsecond queries, and it is recovered after roughly
 600--215,000 queries, depending on the terrain size, the variant and the alternative.
 
 \paragraph{Slopes and weights.}
@@ -1253,6 +1342,11 @@ $\lambda$ enters the near radius, the window and the ellipse, and a small $w_{\m
 slopes raise $\sigma_C$ and lengthen the capped tails: with heights scaled by 5 (median slope 63$^\circ$) the
 uncapped index stores 1.8 times as many labels and builds 2.4 times as long, though its answers stay as accurate
 (Table~\ref{tab:adversarial}). On weighted terrains we certify only the upper bound.
+
+\paragraph{Distances, not paths.}
+The index returns distances and intervals, not paths. $\UB$ is the length of a path through the minimising portal,
+and that path could be traced by two exact sweeps from $s$ and $t$ on their ellipse sub-meshes, but we have not
+implemented path reporting, and all our timings are for distances.
 
 \paragraph{Static terrains.}
 The index is static. Terrains that change, the setting of UP-Oracle, would need the affected cuts rebuilt.
@@ -1328,6 +1422,29 @@ $2\eps\lambda/\sigma_C\le2$, this takes at most $\frac{\sigma_C}{\eps\lambda}\lo
 A vertex stores the rows of the cuts on its path to the root, which gives the label count, and its near table
 holds $|N_R(u)|$ entries. If $\sigma_C/\lambda$, $\kappa_C$ and $r_C$ are bounded, a cut has $k+O(\eps^{-1}\log k)$
 portals, and median cuts give a hierarchy of depth $O(\log n)$.
+\end{proof}
+
+\begin{proof}[Proof of Theorem~\ref{thm:locality}]
+Let $d=d(s,t)$ and $m=\max(g_C,\delta d)$. \emph{Upper bound:} as in the proof of Theorem~\ref{thm:main},
+$\UB\le d+A_j$ for the interval holding a crossing $x^\ast$. Inside $I_C$, $A_j\le g_C$; in a tail, $x^\ast$ has offset
+at least $c_j$, so $d\ge2\lambda c_j$ and $A_j\le\max(g_C,2\delta\lambda c_j)\le m$. \emph{Lower bound:} an interval
+term with $A_j\le g_C$ is at least $d-g_C$. Any other is a tail term with $A_j\le2\delta\lambda c_j$ whose portals
+have offset at least $c_j$ from $B_M$, so $f\ge\max(d,2\lambda c_j)$ at both, and the term is at least
+$\max(d,2\lambda c_j)(1-\delta)\ge(1-\delta)d$. End-stretch terms are at least $d-2e_k$ with $2e_k<g$. So
+$\LB\ge d-m$. If $d\ge g_C/\delta$ then $m=\delta d$ and $\UB/\LB\le(1+\delta)/(1-\delta)=1+\eps$, so the pair is
+accepted. For a refined pair, $\lambda|S-T|\le d<g_C/\delta$, so $|S-T|<w_C$, and since $s$ and $t$ lie on opposite
+sides of the cut line, both are within $w_C$ of it. The sweep box is $\mathrm{bbox}(s,t)$ dilated by
+$\UB/(2\lambda)$, and $\UB\le d+g_C<(1+\delta)g_C/\delta$, so its side is below $|S-T|+\UB/\lambda<(2+\delta)w_C$.
+
+For the count, fix $C$ with box $B_M$ and $b_C=|I_C|$. A refined pair has an endpoint in the strip of width $w_C$
+along the cut, at most $\rho_{\max}w_Cb_C$ vertices, and the other within $w_C$ of it on the other side, at most
+$\rho_{\max}\pi w_C^2/2$, so $C$ refines at most $\frac\pi2\rho_{\max}^2b_Cw_C^3$ pairs. On a capped cut
+$g_C=A(I_C)/k\le\sigma_Cb_C/k$, so $w_C\le\beta b_C$, and the count is at most $\frac\pi2\rho_{\max}^2\beta^3b_C^4$.
+(On an uncapped cut $w_C=g/(\delta\lambda)=(2+\eps)R$, which is the second statement.) The cut crosses the
+shorter side of its box, so $b_C^2\le\mathrm{area}(B_M)\le|M|/\rho_{\min}$, and the boxes at one depth $\ell$ have
+disjoint interiors, so $\sum_{C\text{ at depth }\ell}b_C^4\le\mathcal A\,n/(2^\ell\rho_{\min})$ with median cuts,
+where $\mathcal A\le n/\rho_{\min}$ is the area of the chart. Summing over depths gives
+$\sum_Cb_C^4\le2n^2/\rho_{\min}^2$, and the bound follows.
 \end{proof}
 
 \begin{proof}[Proof of Theorem~\ref{thm:a2a}]

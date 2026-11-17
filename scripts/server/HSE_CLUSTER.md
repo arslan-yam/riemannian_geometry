@@ -162,6 +162,18 @@ One part only: `REVIEW_PARTS="landmark adv" SLURM=1 ...`. Expected wall times on
 - `rv.adv.ours.*`: 1–5 days.
 - `rv.rep*`: like the main `ours` runs.
 
+Two parts are not in the default list and are submitted by name:
+
+- `advvtp`: the cluster terrain with VTP for labels and reference, plus one cap-64 build with MMP labels whose every
+  sweep is repeated by VTP (`--cross-check 1`), 3 jobs after its truth job.
+- `followup`: TJ and GI again, 8 jobs of 1–2 days. Uncapped and cap 64 time 1M independent random pairs in one pass
+  and sweep one cut in 20 with both solvers. Cap 64 and cap 16 use δ tails (`--tail-eps delta`) and log every refined
+  pair.
+
+```bash
+REVIEW_PARTS="advvtp followup" SLURM=1 SLURM_ACCOUNT=<project> scripts/server/run_server.sh review 2>&1 | tee -a results/server/submit_review.log
+```
+
 Results go to `results/server/review/`. The tables are produced on the Mac:
 
 ```bash
@@ -194,7 +206,7 @@ tail -3 results/server/logs/<job>.log             # what one job is doing
 ## 7. Copy the results back (on the Mac)
 
 ```bash
-rsync -av hse-hpc:rg/results/server/ results/server/ --exclude meshes/ --exclude 'dgg/*/*.binary' --exclude 'dgg/*/*.off' --exclude review/work/
+rsync -av hse-hpc:rg/results/server/ results/server/ --exclude /meshes/ --exclude ngf/ --exclude 'dgg/*/*.binary' --exclude 'dgg/*/*.off' --exclude review/work/
 ```
 
 The partial JSON files are valid, so you can copy while jobs are still running. Copy the results back before

@@ -338,7 +338,7 @@ std::vector<double> CertifiedIndex::place(const Run& R, double r_lo, double r_hi
     auto arc = [&](double u) { return interp1(u, ub, ab); };
     auto inv = [&](double s) { return interp1(s, ab, ub); };
     std::vector<double> pos{U0, U1};
-    double k2 = 2.0 * eps * lam;
+    double k2 = 2.0 * (opt.tail_eps > 0 ? opt.tail_eps : eps) * lam;
     double rl = std::max(U0, r_lo), rh = std::min(U1, r_hi);
     if (rh > rl) {
         double A0 = arc(rl), A1 = arc(rh);
@@ -693,21 +693,50 @@ void CertifiedIndex::labels_phase() {
         std::vector<float> Lc(nm * K, std::numeric_limits<float>::infinity());
         std::atomic<int> next{0};
         std::vector<char> vtp_used(workers, 0);
+        const int64_t stride = opt.cross_check > 0 ? std::max<int64_t>(1, std::llround(1.0 / opt.cross_check)) : 0;
+        const bool check = exact && stride > 0 && (int64_t)cid % stride == 0;
         run_threads(workers, [&](int w) {
             bool vtp = W.vtp;
             const double mem = opt.solver == "steiner" ? steiner_bytes(W.F2.size() / 3, opt.steiner_m) : solver_bytes(W.F2.size() / 3, W.vtp);
-            gate.acquire(mem);
+            const double mem2 = check ? solver_bytes(W.F2.size() / 3, !W.vtp) : 0;
+            gate.acquire(mem + mem2);
             std::unique_ptr<Solver> sol(cut_solver(W, vtp));
             vtp_used[w] = vtp;
-            std::vector<double> out(nm);
+            // the other exact solver (cross-check): MMP with early stop, or VTP (nullptr if it rejects the sub-mesh)
+            std::unique_ptr<Solver> sol2(check ? (vtp ? make_mmp(W.V2, W.F2, true) : make_vtp(W.V2, W.F2, true)) : nullptr);
+            std::vector<double> out(nm), out2(sol2 ? nm : 0);
+            int64_t cs = 0, cl = 0, cd = 0, cds = 0, cu = 0; double cmax = 0;
             for (int j; (j = next++) < K;) {
                 if (W.pidx[j] < 0) continue;
                 sol->dist((unsigned)W.pidx[j], W.tgt, out.data());
-                for (size_t r = 0; r < nm; ++r) Lc[r * K + j] = f32_up(out[r]);
                 (vtp ? n_vtp : n_mmp)++;
+                if (sol2) {
+                    sol2->dist((unsigned)W.pidx[j], W.tgt, out2.data());
+                    ++cs; bool any = false;
+                    for (size_t r = 0; r < nm; ++r) {
+                        double a = out[r], b = out2[r];
+                        const bool ra = a < 1e90, rb = b < 1e90;
+                        ++cl;
+                        if (ra != rb) { ++cd; ++cu; any = true; }
+                        else if (ra) {
+                            double rel = std::fabs(a - b) / std::max(std::min(a, b), 1e-300);
+                            if (rel > 1e-9) { ++cd; any = true; }
+                            cmax = std::max(cmax, rel);
+                        }
+                        out[r] = std::min(a, b);
+                    }
+                    cds += any;
+                }
+                for (size_t r = 0; r < nm; ++r) Lc[r * K + j] = f32_up(out[r]);
             }
+            if (cs) {
+                std::lock_guard<std::mutex> lk(log_mu);
+                cc_sweeps += cs; cc_labels += cl; cc_disagree += cd; cc_disagree_sweeps += cds; cc_unreached += cu;
+                cc_max_rel = std::max(cc_max_rel, cmax);
+            }
+            sol2.reset();
             sol.reset();
-            gate.release(mem);
+            gate.release(mem + mem2);
         });
         C.used_vtp = vtp_used[0];
         finish_cut(C, Lc, W, K);
@@ -1026,19 +1055,21 @@ void CertifiedIndex::eval_cut(const Cut& C, int s, int t, int rs, int rt, double
     double lb = INF;
     const bool use_lb = exact && C.lb_ok;
     if (use_lb) {
+        // the storage rounding is relative to the label sums f, not to the term f - gap: the margin goes on
+        // f (h = half of it), before the arc gap is subtracted
+        const double h = 0.5 * (1.0 - 2 * F32_REL);
         double l4[4] = {INF, INF, INF, INF};
         int k = 1;
         for (; k + 4 <= K; k += 4)
-            for (int i = 0; i < 4; ++i) l4[i] = std::min(l4[i], 0.5 * (flo[k + i - 1] + flo[k + i]) - sub[k + i]);
-        for (; k < K; ++k) l4[0] = std::min(l4[0], 0.5 * (flo[k - 1] + flo[k]) - sub[k]);
+            for (int i = 0; i < 4; ++i) l4[i] = std::min(l4[i], h * (flo[k + i - 1] + flo[k + i]) - sub[k + i]);
+        for (; k < K; ++k) l4[0] = std::min(l4[0], h * (flo[k - 1] + flo[k]) - sub[k]);
         lb = std::min(std::min(l4[0], l4[1]), std::min(l4[2], l4[3]));
         for (size_t e = 0; e < C.end_idx.size(); ++e) {
             int64_t i = C.end_idx[e];
-            lb = std::min(lb, flo[i] - C.end_gap[e] - (qerr ? 2 * qerr[i] : 0.0));
+            lb = std::min(lb, 2 * h * flo[i] - C.end_gap[e] - (qerr ? 2 * qerr[i] : 0.0));
         }
     }
     if (!use_lb || !std::isfinite(lb)) lb = 0;
-    lb *= 1.0 - 2 * F32_REL;
     lb = std::max(lb, chord());
     double est = ub;
     if (opt.interp) {
