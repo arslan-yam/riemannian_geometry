@@ -149,6 +149,12 @@ res() { # Slurm resources of one job, by its name: cores, memory, time limit, GP
     rv.advvtp.truth)       m=16G;           t=2-00:00:00 ;;  # steep terrains: larger sub-meshes, longer builds
     rv.rep*)               m=16G;           t=4-00:00:00 ;;
     rv.fu.*)               m=32G;           t=4-00:00:00 ;;  # cross-check: two solvers in memory
+    rv.real.truth.*)       m=16G;           t=2-00:00:00 ;;
+    rv.real.ours.*)        m=48G;           t=8-00:00:00 ;;  # steep real relief: larger sub-meshes, longer builds
+    rv.real.dgg.*)         m=32G;           t=1-00:00:00 ;;
+    rv.dec.ours.*)   c=16; m=96G;            t=1-00:00:00 ;;  # 16-thread build, as the proximity runs
+    rv.dec.dgg.*|rv.dec.score.*) m=32G;      t=12:00:00 ;;
+    rv.dec.lm.*|rv.dec.sep.*)    m=32G;      t=2-00:00:00 ;;
     rv.small.*)            m=8G;            t=1-00:00:00 ;;
     *)                     m=$((16 * k))G;  t=3-00:00:00 ;;
   esac
@@ -470,6 +476,8 @@ review) # the experiments asked by the November 2026 review, results in $O/revie
         #  advvtp    (not in the default list) the cluster terrain with VTP labels and reference (--exact vtp), and
         #            with MMP labels cross-checked by VTP (--cross-check 1)
         #  followup  (not in the default list) independent-pair latency, solver cross-check, delta tails (TJ, GI)
+        #  decisions (not in the default list) go / no-go, coverage and dispatch decisions of every method on the
+        #            proximity workload (scripts/server/decisions.py)
         #  repeats   two more builds of our TJ and GI indexes (uncapped, cap 64) for the build-time spread, with the
         #            strict (tolerance-free) soundness counters of cci_exp (items 4, 6)
         #  small     the small terrains again with the strict counters (item 4)
@@ -518,6 +526,34 @@ review) # the experiments asked by the November 2026 review, results in $O/revie
       echo "run rv.advvtp.ours.k64 $RX $F --eps 0.2 --gap-factor 1 --kmax 64 $QS $TV $V --refine --json $RV/advvtp.cluster.k64.json"
       # MMP labels, every sweep repeated with VTP (the minimum is kept): checked against the VTP reference
       echo "run rv.advvtp.ours.cc $RX $F --eps 0.2 --gap-factor 1 --kmax 64 $QS --truth-cache $O/truth/$M.vtp.s200x10 --cross-check 1 $V --refine --json $RV/advvtp.cluster.k64cc.json"; } | DEP=$a2 par $JOBS > /dev/null ;;
+  real) # (not in the default list) real DEMs: the meshes named in $REAL_MESHES (prepared OFF files in $IN, made by
+        # scripts/competitors/dem_to_mesh.py + prepare_mesh.py on the Mac and copied there): truth, ours uncapped and
+        # cap 64, DGG 1e-4 (as adv)
+    for M in ${REAL_MESHES:?set REAL_MESHES to the mesh names}; do F=$IN/$M.off
+      a2=$(echo "run rv.real.truth.$M $RX $F --eps 0.2 --gap-factor 1 $QS $(truth $M) --export $O/comp/$M --truth-only" | par 1)
+      { echo "run rv.real.ours.$M.kd $RX $F --eps 0.2 --gap-factor 1 $QS $(truth $M) $V --refine --timing-pairs 1000000 --json $RV/real.$M.kd.json"
+        echo "run rv.real.ours.$M.k64 $RX $F --eps 0.2 --gap-factor 1 --kmax 64 $QS $(truth $M) $V --refine --timing-pairs 1000000 --json $RV/real.$M.k64.json"
+        echo "run rv.real.dgg.$M scripts/server/dgg_review_one.sh $M 0.0001 bench"; } | DEP=$a2 par $JOBS > /dev/null
+    done ;;
+  decisions) # (not in the default list) the decision workload: the 100 queries x 10,000 objects of the proximity
+             # runs ($O/comp/prox.<T>.pairs, from proxexp), answered pair by pair by every method and scored as
+             # go / no-go, coverage and dispatch decisions (scripts/server/decisions.py). Ours uncapped and cap 64
+             # and DGG on the six terrains; landmarks (64, 256, 1,024) and SEP on TJ and GI
+    D=$RV/dec; mkdir -p $D
+    for T in $TERR; do M=${T}pre_500000; PP=$O/comp/prox.$T.pairs
+      P="$X2/proximity $IN/$M.off --eps 0.2 --gap-factor 1 --store code8 --threads 16 --solver-mem-gb 60 --objects 10000 --queries 100 --k 10 --radius 0.1 --truth-cache $O/truth/$M.prox"
+      ids=$( { echo "run rv.dec.ours.$T.kd $P --dump-pairs $D/ours.$T.kd.txt --json $D/ours.$T.kd.json"
+               echo "run rv.dec.ours.$T.k64 $P --kmax 64 --dump-pairs $D/ours.$T.k64.txt --json $D/ours.$T.k64.json"
+               for E in 0.001 0.0001; do echo "run rv.dec.dgg.$T.$E scripts/server/dgg_review_one.sh $M $E dump"; done
+               if [ $T = TJ ] || [ $T = GI ]; then
+                 echo "run rv.dec.lm.$T bash -c 'scripts/server/prox_split.sh $PP $D/prox.$T && $X2/landmark_bench $IN/$M.off $D/prox.$T.pp $D/prox.$T.tr --L 64,256,1024 --prox $PP --k 10 --refine-sample 0 --dump-prox $D/lm.$T --json $D/lm.$T.json'"
+               fi; } | par $JOBS )
+      if [ $T = TJ ] || [ $T = GI ]; then
+        s1=$(echo "run rv.dec.sep.$T bash -c '$X2/sep_bench $IN/$M.off $D/prox.$T.pp $D/prox.$T.tr --dump $D/sep.$T.txt --json $D/sep.$T.json'" | DEP=$ids par 1)
+        ids="$ids:$s1"; X="lm64:interval:$D/lm.$T.L64 lm256:interval:$D/lm.$T.L256 lm1024:interval:$D/lm.$T.L1024 sep:point:$D/sep.$T.txt"
+      else X=""; fi
+      echo "run rv.dec.score.$T python3 scripts/server/decisions.py $PP $IN/$M.off ours:interval:$D/ours.$T.kd.txt ours64:interval:$D/ours.$T.k64.txt dgg1e-3:point:$D/dgg.$T.0.001.txt dgg1e-4:point:$D/dgg.$T.0.0001.txt $X --json $RV/decisions.$T.json" | DEP=$ids par 1 > /dev/null
+    done ;;
   followup) # (not in the default list) TJ and GI again: latency over 1M independent random pairs, one cut in 20
             # swept by both exact solvers, and cap 64 / cap 16 with delta tails (the refine-locality theorem; every
             # refined pair is logged with d / g_C)

@@ -559,8 +559,8 @@ static double query(const Sep& S, int x, int y, int* same_leaf = nullptr) {
 }
 
 int main(int argc, char** argv) {
-    if (argc < 2) { std::fprintf(stderr, "usage: sep_bench mesh.off [pairs truth] [--json out] [--vmax 30] [--gap 0.333] [--tol 0.005] [--maxdeg 12] [--leaf-exact] [--random K]\n"); return 1; }
-    std::string mesh = argv[1], pairs_f, truth_f, json;
+    if (argc < 2) { std::fprintf(stderr, "usage: sep_bench mesh.off [pairs truth] [--json out] [--vmax 30] [--gap 0.333] [--tol 0.005] [--maxdeg 12] [--leaf-exact] [--random K] [--dump out.txt]\n"); return 1; }
+    std::string mesh = argv[1], pairs_f, truth_f, json, dump;
     Sep S; bool leaf_exact = false; int nrand = 0;
     int i = 2;
     if (argc > 3 && argv[2][0] != '-') { pairs_f = argv[2]; truth_f = argv[3]; i = 4; }
@@ -574,6 +574,7 @@ int main(int argc, char** argv) {
         else if (a == "--maxdeg") S.maxdeg = std::min(12, std::stoi(nx()));
         else if (a == "--leaf-exact") leaf_exact = true;
         else if (a == "--random") nrand = std::stoi(nx());
+        else if (a == "--dump") dump = nx();  // the estimate of every pair, one per line, in file order
         else { std::fprintf(stderr, "unknown option %s\n", a.c_str()); return 1; }
     }
     std::vector<double> V; std::vector<unsigned> F;
@@ -673,6 +674,7 @@ int main(int argc, char** argv) {
         if (rep == 0) q_first = us; else q_us = std::min(q_us, us);
     }
     q_curves /= 3; q_evals /= 3; q_levels /= 3;
+    if (!dump.empty()) { std::ofstream o(dump); char buf[32]; for (double e : est) { std::snprintf(buf, sizeof buf, "%.12g\n", e); o << buf; } }
     std::printf("query time: first pass %.2f us, best of 3 after it %.2f us\n", q_first, q_us);
     std::printf("query work per pair: %.1f levels, %.1f curves evaluated, %.0f grid points\n", (double)q_levels / qp.size(), (double)q_curves / qp.size(), (double)q_evals / qp.size());
     std::vector<double> ae; double esum = 0, emax = -1e300, emin = 1e300;

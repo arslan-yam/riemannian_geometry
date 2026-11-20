@@ -170,8 +170,16 @@ Two parts are not in the default list and are submitted by name:
   and sweep one cut in 20 with both solvers. Cap 64 and cap 16 use δ tails (`--tail-eps delta`) and log every refined
   pair.
 
+- `decisions`: every method answers the 100 queries × 10,000 objects of the proximity runs pair by pair, and
+  `scripts/server/decisions.py` scores the answers as go/no-go, coverage and dispatch decisions.
+  - Six terrains: ours (uncapped and cap 64, 16-thread builds of about 2 h) and DGG (1e-3 and 1e-4, minutes).
+  - TJ and GI only: landmarks (64, 256 and 1,024; about 2 h) and SEP (about 3 h).
+  - One scoring job per terrain writes `review/decisions.<T>.json`.
+  - It needs `comp/prox.<T>.pairs` from `proxexp` and the tools rebuilt:
+    `make -C cpp -j8 BIN=bin2 all dgg bin2/landmark_bench bin2/sep_bench`.
+
 ```bash
-REVIEW_PARTS="advvtp followup" SLURM=1 SLURM_ACCOUNT=<project> scripts/server/run_server.sh review 2>&1 | tee -a results/server/submit_review.log
+REVIEW_PARTS="advvtp followup decisions" SLURM=1 SLURM_ACCOUNT=<project> scripts/server/run_server.sh review 2>&1 | tee -a results/server/submit_review.log
 ```
 
 Results go to `results/server/review/`. The tables are produced on the Mac:

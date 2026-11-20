@@ -30,11 +30,12 @@ static std::vector<double> parse_list(const std::string& s) {
 }
 
 int main(int argc, char** argv) {
-    if (argc < 4) { std::fprintf(stderr, "usage: dgg_knn graph.binary mesh.off pairs [--k 1,10,25] [--radius 0.01,0.03,0.1] [--json out.json]\n"); return 1; }
-    std::string ks_s = "1,10,25", rs_s = "0.01,0.03,0.1", json;
+    if (argc < 4) { std::fprintf(stderr, "usage: dgg_knn graph.binary mesh.off pairs [--k 1,10,25] [--radius 0.01,0.03,0.1] [--json out.json] [--dump out.txt]\n"); return 1; }
+    std::string ks_s = "1,10,25", rs_s = "0.01,0.03,0.1", json, dump;
     for (int i = 4; i + 1 < argc; ++i) {
         std::string a = argv[i];
         if (a == "--k") ks_s = argv[i + 1]; else if (a == "--radius") rs_s = argv[i + 1]; else if (a == "--json") json = argv[i + 1];
+        else if (a == "--dump") dump = argv[i + 1];  // the graph distance of every pair, one per line, in file order
     }
     std::vector<int> ks; for (double k : parse_list(ks_s)) ks.push_back((int)k);
     std::vector<double> rfs = parse_list(rs_s);
@@ -92,6 +93,18 @@ int main(int argc, char** argv) {
         return got;
     };
 
+    if (!dump.empty()) { // one full Dijkstra per query: every object's graph distance (decision workload)
+        std::ofstream o(dump); char buf[32];
+        for (int i = 0; i < Q; ++i) {
+            auto& ob = objs[i];
+            for (size_t j = 0; j < ob.size(); ++j) objmark[ob[j].first] = (int)j;
+            auto got = sweep(qv[i], [&](int n, double) { return n >= (int)ob.size(); });
+            for (auto& x : ob) objmark[x.first] = -1;
+            std::vector<double> dd(ob.size(), INF); for (auto& x : got) dd[x.first] = x.second;
+            for (double v : dd) { std::snprintf(buf, sizeof buf, "%.12g\n", v); o << buf; }
+        }
+        std::printf("dumped %d queries to %s\n", Q, dump.c_str());
+    }
     std::ostringstream knn_js, range_js;
     std::printf("DGG kNN/range %s: %d queries, %.1f objects per query, diag %.1f\n", argv[1], Q, Q ? (double)objs[0].size() : 0.0, diag);
     // kNN: the k other objects settled first (the query vertex itself is not among its objects)

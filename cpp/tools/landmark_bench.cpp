@@ -38,14 +38,15 @@ static float f32_up(double x) { float f = (float)x; if ((double)f < x) f = std::
 static const double REL = 1.0 / (1 << 22);  // float32 rounding margin (two rounded-up values)
 
 int main(int argc, char** argv) {
-    if (argc < 4) { std::fprintf(stderr, "usage: landmark_bench mesh.off pairs truth [--L 16,64,256,1024] [--eps 0.2] [--prox P.pairs] [--k 1,10,100] [--refine-sample 100] [--seed 7] [--sets name:pairs:truth,...] [--json out]\n"); return 1; }
-    std::string Ls = "16,64,256,1024", json, prox, ks_s = "1,10,100", sets_s; double eps = 0.2; int seed = 7, rsample = 100;
+    if (argc < 4) { std::fprintf(stderr, "usage: landmark_bench mesh.off pairs truth [--L 16,64,256,1024] [--eps 0.2] [--prox P.pairs] [--k 1,10,100] [--refine-sample 100] [--seed 7] [--sets name:pairs:truth,...] [--dump-prox PREFIX] [--json out]\n"); return 1; }
+    std::string Ls = "16,64,256,1024", json, prox, ks_s = "1,10,100", sets_s, dump_prox; double eps = 0.2; int seed = 7, rsample = 100;
     for (int i = 4; i + 1 < argc; ++i) {
         std::string a = argv[i]; const char* v = argv[i + 1];
         if (a == "--L") Ls = v; else if (a == "--eps") eps = std::stod(v); else if (a == "--json") json = v;
         else if (a == "--prox") prox = v; else if (a == "--k") ks_s = v; else if (a == "--seed") seed = std::stoi(v);
         else if (a == "--refine-sample") rsample = std::stoi(v);
-        else if (a == "--sets") sets_s = v;  // more vertex-pair sets (near, distance bands): bounds only, no refine
+        else if (a == "--sets") sets_s = v;
+        else if (a == "--dump-prox") dump_prox = v;  // PREFIX: PREFIX.L<L> gets "LB UB" of every --prox pair, in file order  // more vertex-pair sets (near, distance bands): bounds only, no refine
     }
     std::vector<int> Lv; for (double x : parse_list(Ls)) Lv.push_back((int)x);
     std::sort(Lv.begin(), Lv.end());
@@ -181,6 +182,11 @@ int main(int argc, char** argv) {
             { std::ifstream in(prox); long q, o; double d; std::unordered_map<long, int> at;
               while (in >> q >> o >> d) { auto it = at.find(q); if (it == at.end()) { at[q] = (int)qv.size(); qv.push_back((int)q); objs.emplace_back(); it = at.find(q); } objs[it->second].push_back({(int)o, d}); } }
             const int Q = (int)qv.size();
+            if (!dump_prox.empty()) { // the decision workload (scripts/server/decisions.py)
+                std::ofstream o(dump_prox + ".L" + std::to_string(L)); char buf[64]; double lo, hi;
+                std::ifstream in(prox); long q, ob; double d;
+                while (in >> q >> ob >> d) { bounds((int)q, (int)ob, L, lo, hi); std::snprintf(buf, sizeof buf, "%.12g %.12g\n", lo, hi); o << buf; }
+            }
             for (size_t ki = 0; ki < ks.size(); ++ki) {
                 const int k = ks[ki];
                 double t_int = 0, t_ref = 0, amb_sum = 0; int refined = 0, exact = 0;

@@ -8,6 +8,8 @@
 #   pll    hub labels (pruned landmark labelling, time-limited)     -> $O/review/dggpll.<mesh>.<eps>.json
 #   knn    kNN / range over the 10,000 objects of the proximity runs, early-stopping Dijkstra (cpp/tools/dgg_knn)
 #          on $O/comp/prox.<T>.pairs (the proxexp jobs)            -> $O/review/dggknn.<mesh>.<eps>.json
+#   dump   the graph distance of every pair of $O/comp/prox.<T>.pairs (one full Dijkstra per query), for the
+#          decision workload (scripts/server/decisions.py)       -> $O/review/dec/dgg.<T>.<eps>.txt
 # usage: scripts/server/dgg_review_one.sh <mesh, e.g. TJpre_500000> <eps, e.g. 0.0001> <mode>
 # env: DGG_BIN (default cpp/bin2), CH_HOURS (40), CH_CORE_FACTOR (3: the core starts when the mean degree triples), PLL_HOURS (72)
 set -eu
@@ -25,6 +27,7 @@ case $MODE in
   ch)    ${GTIME:-/usr/bin/time} -v $DB/dgg_ch $G $OA/comp/$M.V2V.pairs $OA/comp/$M.V2V.truth --settle 1000 --core-factor ${CH_CORE_FACTOR:-3} --time-limit ${CH_HOURS:-40} --json res.json > res.log 2> res.time; OUT=$OA/review/dggch.$M.$E.json ;;
   pll)   ${GTIME:-/usr/bin/time} -v $DB/dgg_ch $G $OA/comp/$M.V2V.pairs $OA/comp/$M.V2V.truth --ch 0 --pll degree --pll-time-limit ${PLL_HOURS:-72} --json res.json > res.log 2> res.time; OUT=$OA/review/dggpll.$M.$E.json ;;
   knn)   $DB/dgg_knn $G $M.off $OA/comp/prox.$T.pairs --k 1,10,100 --radius 0.01,0.03,0.1 --json res.json | tee res.log; OUT=$OA/review/dggknn.$M.$E.json ;;
+  dump)  mkdir -p $OA/review/dec; $DB/dgg_knn $G $M.off $OA/comp/prox.$T.pairs --k 1 --radius 0.01 --dump $OA/review/dec/dgg.$T.$E.txt --json res.json | tee res.log; OUT=$OA/review/dec/dgg.$T.$E.json ;;
   *) echo "unknown mode $MODE"; exit 1 ;;
 esac
 # one JSON: the result + the precompute's wall time and peak memory + graph size (+ the run's own GNU time if any)
