@@ -182,6 +182,14 @@ Two parts are not in the default list and are submitted by name:
 REVIEW_PARTS="advvtp followup decisions" SLURM=1 SLURM_ACCOUNT=<project> scripts/server/run_server.sh review 2>&1 | tee -a results/server/submit_review.log
 ```
 
+`proxfix` (not in the default list) recomputes the proximity truth with the fixed VTP (the `<M>.prox` caches predate
+the 26 Oct fix) and rescores the decision workload from the dumps already in `review/dec`, into
+`review/decisions2.<T>.json`. One proximity job (VTP sweeps only, minutes) and one scoring job per terrain:
+
+```bash
+REVIEW_PARTS="proxfix" SLURM=1 SLURM_ACCOUNT=<project> scripts/server/run_server.sh review 2>&1 | tee -a results/server/submit_review.log
+```
+
 Results go to `results/server/review/`. The tables are produced on the Mac:
 
 ```bash

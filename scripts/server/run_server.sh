@@ -153,7 +153,7 @@ res() { # Slurm resources of one job, by its name: cores, memory, time limit, GP
     rv.real.ours.*)        m=48G;           t=8-00:00:00 ;;  # steep real relief: larger sub-meshes, longer builds
     rv.real.dgg.*)         m=32G;           t=1-00:00:00 ;;
     rv.dec.ours.*)   c=16; m=96G;            t=1-00:00:00 ;;  # 16-thread build, as the proximity runs
-    rv.dec.dgg.*|rv.dec.score.*) m=32G;      t=12:00:00 ;;
+    rv.dec.dgg.*|rv.dec.score.*|rv.dec.rescore.*|rv.proxfix.*) m=32G; t=12:00:00 ;;
     rv.dec.lm.*|rv.dec.sep.*)    m=32G;      t=2-00:00:00 ;;
     rv.small.*)            m=8G;            t=1-00:00:00 ;;
     *)                     m=$((16 * k))G;  t=3-00:00:00 ;;
@@ -534,6 +534,16 @@ review) # the experiments asked by the November 2026 review, results in $O/revie
       { echo "run rv.real.ours.$M.kd $RX $F --eps 0.2 --gap-factor 1 $QS $(truth $M) $V --refine --timing-pairs 1000000 --json $RV/real.$M.kd.json"
         echo "run rv.real.ours.$M.k64 $RX $F --eps 0.2 --gap-factor 1 --kmax 64 $QS $(truth $M) $V --refine --timing-pairs 1000000 --json $RV/real.$M.k64.json"
         echo "run rv.real.dgg.$M scripts/server/dgg_review_one.sh $M 0.0001 bench"; } | DEP=$a2 par $JOBS > /dev/null
+    done ;;
+  proxfix) # (not in the default list) the proximity truth again with the fixed VTP (the caches $O/truth/<M>.prox are
+           # from 17 Oct, before the 26 Oct VTP fix, and some of their distances are too long): same queries and
+           # objects, new cache <M>.prox.v2 and export comp/prox2.<T>.pairs, then the decision workload rescored on it
+           # from the per-pair answers already in $RV/dec (no index or graph is rebuilt)
+    D=$RV/dec
+    for T in $TERR; do M=${T}pre_500000
+      a1=$(echo "run rv.proxfix.$T $X2/proximity $IN/$M.off --objects 10000 --queries 100 --truth-cache $O/truth/$M.prox.v2 --export $O/comp/prox2.$T --export-only" | par 1)
+      if [ $T = TJ ] || [ $T = GI ]; then X="lm64:interval:$D/lm.$T.L64 lm256:interval:$D/lm.$T.L256 lm1024:interval:$D/lm.$T.L1024 sep:point:$D/sep.$T.txt"; else X=""; fi
+      echo "run rv.dec.rescore.$T python3 scripts/server/decisions.py $O/comp/prox2.$T.pairs $IN/$M.off ours:interval:$D/ours.$T.kd.txt ours64:interval:$D/ours.$T.k64.txt dgg1e-3:point:$D/dgg.$T.0.001.txt dgg1e-4:point:$D/dgg.$T.0.0001.txt $X --json $RV/decisions2.$T.json" | DEP=$a1 par 1 > /dev/null
     done ;;
   decisions) # (not in the default list) the decision workload: the 100 queries x 10,000 objects of the proximity
              # runs ($O/comp/prox.<T>.pairs, from proxexp), answered pair by pair by every method and scored as

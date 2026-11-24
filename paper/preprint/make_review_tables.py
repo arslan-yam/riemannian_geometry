@@ -69,6 +69,13 @@ for name, what, K in KINDS:
     sl = f"{mj['slope_p50_deg']:.0f}/{mj['slope_p99_deg']:.0f}" if "slope_p50_deg" in mj else "--"
     asp = f"{mj['aspect_p99']:.1f}" if "aspect_p99" in mj else "--"
     c = [name, what, f"{nv / 1e3:.0f}k" if nv else "--", sl, asp]
+    vtp = {}
+    if K == "cluster":  # MMP fails on this mesh: where the VTP-labelled run exists, show it, against the VTP reference
+        for tag in ("kd", "k64"):
+            x = J(os.path.join(RV, f"advvtp.cluster.{tag}.json"))
+            if x and x.get("complete", True):
+                vtp[tag] = x
+        kd, k64 = vtp.get("kd", kd), vtp.get("k64", k64)
     for d, cap in ((kd, False), (k64, True)):
         if not d:
             c += ["running"] + [""] * 3
@@ -76,10 +83,12 @@ for name, what, K in KINDS:
         v8 = var(d, "code8/sym")
         v = v8 if cap else var(d, "dense/sym")  # errors of the stored variant: float32 uncapped, 8-bit capped
         n = v["pairs"]  # a pair the reference did not reach has error 1 here: left out of the mean
-        mean = (v["est_mean"] * n - nu) / (n - nu)
-        mx = "--" if nu else pct(v["est_max"], 2)
+        u = 0 if ("k64" if cap else "kd") in vtp else nu
+        mean = (v["est_mean"] * n - u) / (n - u)
+        mx = "--" if u else pct(v["est_max"], 2)
         size = gb(v8["index_bytes"]) if cap else f"{gb(v['index_bytes'])}/{gb(v8['index_bytes'])}"
-        c += [h(shortest("TJ", "k64" if cap else "kd") if K is None else d["build_s"]), size, pct(mean, 4), mx]
+        c += [h(shortest("TJ", "k64" if cap else "kd") if K is None else d["build_s"])
+              + ("$^\\dagger$" if ("k64" if cap else "kd") in vtp else ""), size, pct(mean, 4), mx]
     c += [f"{g['query_ms_p2p']:.0f}\\,ms", pct((g["err_mean"] * g["queries"] - nu) / (g["queries"] - nu), 4)] if g else ["--", "--"]
     rows.append(" & ".join(c) + "\\\\")
 with open(os.path.join(OUT, "tab_adversarial.tex"), "w") as f:

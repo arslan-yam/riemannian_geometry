@@ -103,13 +103,18 @@ Ours for comparison (cap 64, 8-bit / uncapped): see tab:server-ours; width media
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | steep5 | 251001 | 9 | 82 | kd | 27.8 h | 3424 MB | 2.06 us | 0.0020% | 0.341% | 0.261% | 0 | 1413 (max 3.1e-15) | True | 261 ms / 0.0032% |
 | steep5 | 251001 | 9 | 82 | k64 | 20.0 h | 1230 MB | 1.11 us | 0.0668% | 2.916% | 2.488% | 8 | 1413 (max 3.1e-15) | True |  |
+| steep10 | 251001 | 17 | 86 | kd | 176.7 h | 5701 MB | 3.32 us | 0.0013% | 0.182% | 0.195% | 0 | 1605 (max 8.2e-15) | True | 261 ms / 0.0031% |
+| steep10 | 251001 | 17 | 86 | k64 | 124.2 h | 1596 MB | 0.45 us | 0.1323% | 10.956% | 3.154% | 24 | 1605 (max 8.2e-15) | True |  |
 | aniso | 251001 | 10 | 50 | kd | 11.6 h | 956 MB | 0.37 us | 0.0017% | 0.236% | 0.116% | 0 | 597 (max 1.4e-14) | True | 365 ms / 0.0034% |
 | aniso | 251001 | 10 | 50 | k64 | 11.4 h | 822 MB | 0.30 us | 0.0026% | 0.236% | 0.117% | 0 | 597 (max 1.4e-14) | True |  |
 | slivers | 251001 | 28 | 55 | kd | 16.0 h | 1988 MB | 1.31 us | 0.0012% | 0.163% | 0.357% | 0 | 1509 (max 6.5e-14) | True | 439 ms / 0.0031% |
 | slivers | 251001 | 28 | 55 | k64 | 9.8 h | 955 MB | 0.33 us | 0.0177% | 0.981% | 1.961% | 1 | 1509 (max 6.5e-14) | True |  |
+| cluster | 245292 | 17 | 57 | kd | 125.3 h | 4402 MB | 2.42 us | 0.0509% | 100.000% | 0.144% | 3 | 1725 (max 2.2e+96) | False | 292 ms / 0.0526% |
 | cluster | 245292 | 17 | 57 | k64 | 34.1 h | 1036 MB | 0.38 us | 0.0782% | 100.000% | 2.188% | 12 | 1722 (max 2.2e+96) | False |  |
 | ties | 251001 | 3 | 58 | kd | 4.4 h | 2020 MB | 1.52 us | 0.0040% | 0.364% | 0.352% | 0 | 1488 (max 4.4e-16) | True | 330 ms / 0.0033% |
 | ties | 251001 | 3 | 58 | k64 | 2.6 h | 961 MB | 0.37 us | 0.0339% | 1.605% | 2.028% | 1 | 1488 (max 4.4e-16) | True |  |
+| comb | 187987 |  |  | kd | 150.6 h | 1964 MB | 1.77 us | 0.0027% | 0.857% | 0.020% | 0 | 1590 (max 6.7e-16) | True | 87 ms / 0.0082% |
+| comb | 187987 |  |  | k64 | 148.0 h | 1475 MB | 0.83 us | 0.0026% | 0.857% | 0.090% | 0 | 1590 (max 6.7e-16) | True |  |
 
 ## 6. Build repeats (one thread, type_d nodes)
 
@@ -122,4 +127,18 @@ Ours for comparison (cap 64, 8-bit / uncapped): see tab:server-ours; width media
 
 ## 4. Strict soundness (no tolerance) over every review run of our index
 
-34 runs, 1898055 answers, 35418 outside the raw interval, largest relative violation 2.25e+96
+39 runs, 2235789 answers, 43533 outside the raw interval, largest relative violation 2.25e+96
+
+## 7. Follow-up: independent-pair latency, solver cross-check, delta tails (TJ, GI, 0.5M faces)
+
+| run | build (h) | size (MB, 8-bit) | 1M pairs: mean / p50 / p99 (us) | uncertified | cross-check: sweeps / disagree / max rel | refined pairs: max d/g_C |
+| --- | --- | --- | --- | --- | --- | --- |
+| advvtp.cluster.k64cc | 93.0 | 440 | -- | -- | 1112811 / 28505 / 2.0e-01 | 4.54 (n=7, 1/delta=5.0) |
+| fu.GI.k16d | 8.1 | 279 | 1.27 / 1.14 / 2.59 | 1701 | -- | 4.94 (n=36, 1/delta=11.0) |
+| fu.GI.k64 | 9.0 | 359 | 1.07 / 1.16 / 2.18 | 7 | 18512 / 0 / 3.0e-11 | 1.20 (n=1, 1/delta=5.0) |
+| fu.GI.k64d | 10.0 | 396 | 1.09 / 1.18 / 2.29 | 7 | -- | 1.20 (n=1, 1/delta=11.0) |
+| fu.GI.kd | 17.9 | 624 | 2.28 / 2.45 / 3.50 | 0 | 19057 / 0 / 3.0e-11 | none |
+| fu.TJ.k16d | 5.7 | 278 | 0.89 / 0.91 / 1.94 | 1439 | -- | 5.38 (n=34, 1/delta=11.0) |
+| fu.TJ.k64 | 10.7 | 358 | 1.10 / 1.19 / 2.33 | 12 | 18484 / 0 / 2.3e-11 | 1.31 (n=1, 1/delta=5.0) |
+| fu.TJ.k64d | 11.1 | 396 | 1.08 / 1.15 / 2.27 | 12 | -- | 1.31 (n=1, 1/delta=11.0) |
+| fu.TJ.kd | 20.6 | 618 | 2.34 / 2.51 / 3.62 | 0 | 19026 / 0 / 2.3e-11 | none |

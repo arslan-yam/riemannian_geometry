@@ -480,8 +480,15 @@ smaller value at each target and count the disagreements. On Gunnison10k with ev
 disagree on 2 of 6.76 million labels, by at most $3\cdot10^{-8}$ relative. On a clustered variant of Gunnison10k
 built the same way, they disagree in 344 of 83,744 sweeps, on 642 labels, by up to 8.3\%, and one of them leaves
 36 labels unreached. Keeping the smaller value, all 1,000 random pairs of the capped index lie in their intervals.
-That reference is MMP itself; the cluster run of Table~\ref{tab:adversarial} checks against VTP. Checking every cut doubles the sweeps. Checking one cut in 20 costs about 5\%, and at this rate of
-failure it would still flag the mesh.
+That reference is MMP itself, so we repeated the clustered variant of TJ in Table~\ref{tab:adversarial} against VTP.
+Built with MMP labels and every cut checked, the two solvers disagree on 28,505 of 214 million labels, in 2,126 of
+1.11 million sweeps, by up to 20\%, and one of them leaves 309 labels unreached. Keeping the smaller value gives the
+same answers as VTP labels alone, and both are sound against the VTP reference. On TJ and GI at 0.5M faces, checking
+every 20th cut finds no disagreement above $3\cdot10^{-11}$. Checking every cut doubles the sweeps; on the clustered mesh
+that build took 93\,h, against 34\,h with MMP and 22\,h with VTP alone. Every 20th cut is 5\% of the sweeps, but it includes the root, whose
+sweeps are the largest: it rechecked 30\% of the labels of the uncapped index and 11\% of the capped one.
+Checking a random 5\% of the sweeps instead would cost about 5\%, and at the clustered mesh's rate of about one
+failing sweep in 500 it would still find about 100 of them.
 
 \subsection{Capped portals and certify-or-refine}
 \label{sec:capped}
@@ -525,8 +532,10 @@ in place of $\eps$, so the tails hold at most $2+\eps$ times as many portals. Th
 usually accepted anyway: $\LB$ also takes the chord $\lambda|S-T|$, which is within $1+\eps$ of $d$ unless the path
 detours. On Gunnison10k with $\eps=0.1$ and cap 8, $\delta$ tails make the index 2\% larger, and all 14 refined
 pairs out of 1,000 have $d\le4.8\,g_C$, against the bound $21\,g_C$. Building the tails with $\eps$ refines the same
-14 pairs, so our other runs use $\eps$ tails, and we measure how often the refine runs (Section~\ref{sec:server}):
-with cap 64, for no random pair.
+14 pairs. On TJ and GI at 0.5M faces with $\eps=0.2$, $\delta$ tails make the cap-64 index 10\% larger and refine
+the same pairs (12 and 7 in a million random pairs), and with cap 16 the 34 and 36 refined pairs have
+$d\le5.4\,g_C$, against the bound $11\,g_C$. So our other runs use $\eps$ tails, and we measure how often the refine
+runs (Section~\ref{sec:server}): with cap 64, for no pair of the 2,000 random pairs.
 
 \subsection{Arbitrary surface points}
 \label{sec:a2a}
@@ -904,7 +913,11 @@ interval, up to the tolerance of Section~\ref{sec:index}. The build repeats, the
 small terrains rerun on the cluster checked 1.9 million more, with the same result except two answers on a
 terrain where the reference solver fails (Table~\ref{tab:adversarial}). Our query time is the lookup: the mean over a query set,
 best of five passes. Where the capped index refines, we also give the end-to-end mean, timed per query in one
-pass with refines included. Sizes are the byte counts of the stored structures for our index and SEP, the graph file for DGG, and the
+pass with refines included. Repeated passes keep the touched labels in cache, so on TJ and GI at 0.5M faces we
+also ran one pass over a million independent random pairs. Uncapped, its mean is 1.6--1.7\,$\mu$s (float32) and
+2.3\,$\mu$s (8-bit) instead of 1.4--1.5 and 2.1--2.2\,$\mu$s, with 99th percentiles of 2.8 and 3.6\,$\mu$s; with
+cap 64 it is 0.8 and 1.1\,$\mu$s instead of 0.35--0.41 and 0.57--0.71\,$\mu$s, with 99th percentiles of 1.7 and
+2.3\,$\mu$s, and 7--12 of the million answers need a refine. Sizes are the byte counts of the stored structures for our index and SEP, the graph file for DGG, and the
 growth of EAR-Oracle's resident memory over its build, as its harness reports it, so they compare in order of
 magnitude only. The nodes are shared with other users' jobs, so build times vary. We built the uncapped TJ and GI indexes at
 0.5M faces three times each, in 11.7--12.5\,h (median 12.2) and 11.8--12.5\,h (median 12.3), within 7\% of each
@@ -1210,7 +1223,8 @@ but on the walls 1.1--1.5 times slower (16.5--17.4\,h for EAR).
 theorem pushed up one at a time. Slope: median / 99th percentile of the face slope in degrees; aspect: 99th
 percentile of longest edge over height. Errors over the 2,000 random vertex pairs; sizes in GB (uncapped float32 /
 8-bit). DGG with $\eps=10^{-4}$, search stopped at the target. Every answer of our index is certified and correct
-against the reference, except on \emph{cluster}, where the reference fails (see text).}
+against the reference, except on \emph{cluster}, where the MMP reference fails (see text). $^\dagger$: VTP labels,
+checked against a VTP reference.}
 \label{tab:adversarial}
 \small
 \setlength{\tabcolsep}{3pt}
@@ -1239,8 +1253,16 @@ Every answer stays certified and correct, and the accuracy barely moves: the unc
 the size, as the theorem predicts. With heights $\times5$, the windows and ellipses grow with $1/\lambda$: the
 uncapped index stores 1.76 times as many labels (3.4\,GB) and builds in 27.8\,h instead of 11.7\,h, and the capped
 index builds in 20\,h, keeps its size bounded by the cap (0.44\,GB), and its mean error (8-bit) rises from 0.021\% to
-0.069\%, with 8 refines over the 6,621 pairs of all query sets. Slivers and needles do not enlarge the index or its errors
-and lengthen the build by at most 1.4 times; ties make it faster (more coplanar faces for the exact sweeps). DGG keeps its accuracy on every variant, at 0.09--0.44\,s per query.
+0.069\%, with 8 refines over the 6,621 pairs of all query sets. With heights $\times10$ the build grows faster
+than the size: the uncapped index has 3.5 times TJ's portals and 3 times its labels (5.7\,GB), each swept on a larger
+ellipse, and builds in 177\,h; the capped one builds in 124\,h and stays at 0.56\,GB, with a mean error of 0.13\% and
+25 refines over the 6,621 pairs. Its largest error, 11\%, is an accepted answer within the $\UB\le1.2\,\LB$ the query
+accepts. Slivers and needles do not enlarge the index or its errors
+and lengthen the build by at most 1.4 times; ties make it faster (more coplanar faces for the exact sweeps). The comb keeps the accuracy (mean errors of
+0.0027\% and 0.0052\%, at most 1.01\%, no refines) but has the most expensive build: 151\,h uncapped and 148\,h
+capped for 188k vertices. The walls split every cut line into many runs, the $r_C$ of the theorem, each with its own
+portals, so the comb has 2.8 times TJ's portals with or without the cap, and the cap barely shortens the build.
+DGG keeps its accuracy on every variant, at 0.09--0.44\,s per query.
 
 On \emph{cluster} the exact MMP sweeps themselves fail. Its degenerate faces (aspect ratios up to 30,000) make MMP
 miss one or two vertices from a typical source and return distances up to $7\cdot10^{-4}$ too long at a few others,
@@ -1248,8 +1270,10 @@ which VTP, the other exact solver, does not show. Two answers of the capped inde
 more than the tolerance, and they are the only ones in all our runs that do: a target MMP never reached, for which
 VTP gives 4,452.04 and our upper bound is 4,452.4, and a pair for which MMP is $3.2\cdot10^{-4}$ too long, by more than
 the $1.05\cdot10^{-4}$ our upper bound lies below it. We leave the unreached pair out of the error statistics of this
-row. Because our labels on this terrain are MMP sweeps too, a clean test needs VTP for both labels and reference; we
-report that run, which is in progress, separately.
+row. Because our labels on this terrain are MMP sweeps too, a clean test needs VTP for both labels and reference.
+With VTP labels the capped index is sound against the VTP reference, builds in 22\,h instead of 34\,h, and has a mean
+error of 0.030\% and a maximum of 4.6\% (the row marked $\dagger$); the uncapped VTP build is still running. The
+solver cross-check of Section~\ref{sec:index} flags this mesh: MMP and VTP disagree in about one sweep in 500.
 
 \paragraph{kNN and range queries in the POI setting.}
 UP-Oracle's own workload asks for distances between points of interest, and we ran kNN ($k=1,10,25$) and range

@@ -1,6 +1,6 @@
 # Result manifest
 
-Commit `d429da2e89c406d03d4d87f79382f20aca5bb3c4`, created 2026-11-16T03:38:07 on ARLSANs-MacBook-Air.local.
+Commit `73153657ca1b2b1b98f1916c2a707a8fb96ff8f4`, created 2026-11-24T18:49:51 on ARLSANs-MacBook-Air.local.
 
 ## tab:server-ours
 
@@ -641,19 +641,39 @@ item 5; numbers by `scripts/server/review_summary.py`.
 - `review/adv.aniso.k64.json` sha256 `1ecce5795258`, 61074 answers, strict violations 597
 - `review/adv.aniso.kd.json` sha256 `a1e24f4a4448`, 61074 answers, strict violations 597
 - `review/adv.cluster.k64.json` sha256 `df27a4b125b0`, 63414 answers, strict violations 1722
+- `review/adv.cluster.kd.json` sha256 `9f8e5e9656ff`, 63414 answers, strict violations 1725
+- `review/adv.comb.k64.json` sha256 `252127877dd8`, 77571 answers, strict violations 1590
+- `review/adv.comb.kd.json` sha256 `32adbce31f1c`, 77571 answers, strict violations 1590
 - `review/adv.slivers.k64.json` sha256 `9263aedf1956`, 59589 answers, strict violations 1509
 - `review/adv.slivers.kd.json` sha256 `3838ccf94220`, 59589 answers, strict violations 1509
+- `review/adv.steep10.k64.json` sha256 `c5ceaf36b401`, 59589 answers, strict violations 1605
+- `review/adv.steep10.kd.json` sha256 `3e3b24eba044`, 59589 answers, strict violations 1605
 - `review/adv.steep5.k64.json` sha256 `6bc4c505e95a`, 59589 answers, strict violations 1413
 - `review/adv.steep5.kd.json` sha256 `96792b945496`, 59589 answers, strict violations 1413
 - `review/adv.ties.k64.json` sha256 `c43320c7e6d7`, 59589 answers, strict violations 1488
 - `review/adv.ties.kd.json` sha256 `d61781acdf3b`, 59589 answers, strict violations 1488
-- `review/meshes/TJadv_aniso.json` sha256 `b2d70b79c590`
-- `review/meshes/TJadv_cluster.json` sha256 `b592f53bc130`
-- `review/meshes/TJadv_comb.json` sha256 `d7836676a7a1`
-- `review/meshes/TJadv_slivers.json` sha256 `7acab13c35b5`
-- `review/meshes/TJadv_steep10.json` sha256 `b153876744b6`
-- `review/meshes/TJadv_steep5.json` sha256 `13d7146f38b8`
-- `review/meshes/TJadv_ties.json` sha256 `14b17186e993`
+- `review/advvtp.cluster.k64.json` sha256 `eeb4d3648676`, 63414 answers, strict violations 27
+- `review/advvtp.cluster.k64cc.json` sha256 `d952051813ff`, 63414 answers, strict violations 27
+- `review/meshes/TJadv_aniso.json` sha256 `00fe07d68c4a`
+- `review/meshes/TJadv_cluster.json` sha256 `ec7956493f99`
+- `review/meshes/TJadv_comb.json` sha256 `958729d6a306`
+- `review/meshes/TJadv_slivers.json` sha256 `3ef26f6d6992`
+- `review/meshes/TJadv_steep10.json` sha256 `1172e7430e6a`
+- `review/meshes/TJadv_steep5.json` sha256 `ace81129350c`
+- `review/meshes/TJadv_ties.json` sha256 `2c5140afe74e`
+
+## follow-up: independent-pair latency, solver cross-check, delta tails
+
+Sections 4.4, 6.9; numbers by `scripts/server/review_summary.py`.
+
+- `review/fu.GI.k16d.json` sha256 `913619a62621`, 59589 answers, strict violations 1620
+- `review/fu.GI.k64.json` sha256 `2df47497955b`, 59589 answers, strict violations 1620
+- `review/fu.GI.k64d.json` sha256 `82ce31263e7a`, 59589 answers, strict violations 1620
+- `review/fu.GI.kd.json` sha256 `3f29612a3ab8`, 59589 answers, strict violations 1620
+- `review/fu.TJ.k16d.json` sha256 `f1c089d3adae`, 59589 answers, strict violations 1521
+- `review/fu.TJ.k64.json` sha256 `2faafcbc48e8`, 59589 answers, strict violations 1521
+- `review/fu.TJ.k64d.json` sha256 `1f64a569c0a2`, 59589 answers, strict violations 1521
+- `review/fu.TJ.kd.json` sha256 `731c24d70bc1`, 59589 answers, strict violations 1521
 
 ## review: build repeats and strict checks
 

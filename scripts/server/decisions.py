@@ -75,6 +75,7 @@ def coverage(d, lo, hi, B, bounds):
 
 def dispatch(d, lo, hi, k, bounds, point):
     wrong = qref = refine = scored = 0
+    ap_hit = ap_tot = ap_over = 0; ap_worst = 1.0  # interval methods: the k smallest UB, no refine
     for a, b in zip(bounds[:-1], bounds[1:]):
         dd, l, h = d[a:b], lo[a:b], hi[a:b]
         if len(dd) <= k:
@@ -88,6 +89,9 @@ def dispatch(d, lo, hi, k, bounds, point):
             sel = np.argpartition(l, k - 1)[:k]
             wrong += bool(np.any(dd[sel] > dk * (1 + TIE)))
             continue
+        ap = np.argpartition(h, k - 1)[:k]
+        ap_hit += int(np.sum(dd[ap] <= dk * (1 + TIE))); ap_tot += k
+        r = float(np.max(dd[ap]) / dk); ap_worst = max(ap_worst, r); ap_over += r > 1.2 * (1 + TIE)
         # interval: o is surely in if fewer than k others have LB < UB(o); surely out if >= k others have UB < LB(o)
         Ls, Us = np.sort(l), np.sort(h)
         below_ub = np.searchsorted(Ls, h, side="left") - (l < h)  # others with LB < my UB
@@ -98,7 +102,10 @@ def dispatch(d, lo, hi, k, bounds, point):
         # after refining the undecided ones exactly, the answer is exact: wrong only if the bounds were unsound
         sel = sure_in | (und & (dd <= dk))
         wrong += bool(np.any(dd[sel] > dk * (1 + TIE)) or sel.sum() < k)
-    return dict(queries=scored, wrong=wrong, refined_queries=qref, refined_objects=refine)
+    out = dict(queries=scored, wrong=wrong, refined_queries=qref, refined_objects=refine)
+    if not point:
+        out.update(approx_recall=ap_hit / max(ap_tot, 1), approx_worst_ratio=ap_worst, approx_over_1_2=ap_over)
+    return out
 
 
 def main():
