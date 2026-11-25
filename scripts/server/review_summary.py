@@ -145,3 +145,18 @@ for p in sorted(glob.glob(os.path.join(RV, "fu.*.json")) + glob.glob(os.path.joi
     rmax = f"{max(x['d_over_gC'] for x in rp):.2f} (n={len(rp)}, 1/delta={(2 + d['eps']) / d['eps'] if d.get('tail_eps', d['eps']) < d['eps'] else 1 / d['eps']:.1f})" if rp else "none"
     row(os.path.basename(p)[:-5], f"{d['build_s'] / 3600:.1f}" + ("" if d.get("complete", True) else " (running)"),
         f"{v8['index_bytes'] / 1e6:.0f}" if v8 else "--", lat, ind["uncertified"] if ind else "--", cc, rmax)
+
+print("\n## 8. Decision workload (100 queries x 10,000 objects, 0.5M faces; truth recomputed with the fixed VTP)\n")
+print("decisions2.<T>.json (the decisions.<T>.json files used the 17 Oct truth, before the VTP fix: superseded).\n")
+head("terrain", "method", "interval viol.", "unsafe go 1/3/10%", "lost go 1/3/10%", "range: queries with a miss 1/3/10%",
+     "kNN wrong k=1/10", "undecided pairs 1/3/10%", "kNN k=10 refined objects")
+for T in ("TJ", "GI", "AU", "LH", "SC", "VS"):
+    d = J(os.path.join(RV, f"decisions2.{T}.json"))
+    if not d:
+        continue
+    for m in d["methods"]:
+        b, k = m["budgets"], {x["k"]: x for x in m["dispatch"]}
+        g = lambda f: "/".join(str(x["go_nogo"][f]) for x in b)
+        row(T, m["name"], "--" if m["interval_violations"] is None else m["interval_violations"], g("unsafe_go"), g("lost_go"),
+            "/".join(str(x["coverage"]["queries_with_miss"]) for x in b), f"{k[1]['wrong']}/{k[10]['wrong']}",
+            g("undecided") if m["kind"] == "interval" else "--", k[10]["refined_objects"] if m["kind"] == "interval" else "--")

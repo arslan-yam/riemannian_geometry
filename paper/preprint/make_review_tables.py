@@ -136,3 +136,32 @@ if lines and lines[-1] == "\\midrule":
 with open(os.path.join(OUT, "tab_landmarks.tex"), "w") as f:
     f.write("\n".join(lines) + "\n\\bottomrule\n")
 print("tab_landmarks.tex:", len(lines), "lines")
+
+# ---- decision workload (review/decisions2.<T>.json: scored against the proximity truth recomputed with the fixed VTP)
+DEC_T = ("TJ", "GI", "AU", "LH", "SC", "VS")
+DEC_M = [("ours", "ours, uncapped"), ("ours64", "ours, cap 64"), ("dgg1e-3", "DGG, $10^{-3}$"), ("dgg1e-4", "DGG, $10^{-4}$"),
+         ("lm256", "landmarks, $L=256$"), ("lm1024", "landmarks, $L=1024$"), ("sep", "SEP")]
+dec = {T: J(os.path.join(RV, f"decisions2.{T}.json")) for T in DEC_T}
+dec = {T: d for T, d in dec.items() if d}
+rows = []
+for key, label in DEC_M:
+    ms = [(T, next((m for m in d["methods"] if m["name"] == key), None)) for T, d in dec.items()]
+    ms = [(T, m) for T, m in ms if m]
+    if not ms:
+        continue
+    gs = lambda f, i: sum(m["budgets"][i]["go_nogo"][f] for _, m in ms)
+    cv = lambda f, i: sum(m["budgets"][i]["coverage"][f] for _, m in ms)
+    kn = lambda f, k: sum(next(x for x in m["dispatch"] if x["k"] == k)[f] for _, m in ms)
+    npairs = sum(m["budgets"][2]["go_nogo"]["pairs"] for _, m in ms)
+    nq = sum(next(x for x in m["dispatch"] if x["k"] == 10)["queries"] for _, m in ms)
+    interval = ms[0][1]["kind"] == "interval"
+    viol = sum(m["interval_violations"] or 0 for _, m in ms) if interval else None
+    c = [label, str(len(ms)),
+         "/".join(str(gs("unsafe_go", i)) for i in range(3)), "/".join(str(gs("lost_go", i)) for i in range(3)),
+         str(cv("queries_with_miss", 2)), f"{kn('wrong', 1)}/{kn('wrong', 10)}",
+         (f"{1e6 * gs('undecided', 0) / npairs:,.0f}/{1e6 * gs('undecided', 2) / npairs:,.0f}" if interval else "--"),
+         (f"{kn('refined_objects', 10) / nq:.2f}" if interval else "--")]
+    rows.append(" & ".join(c) + "\\\\")
+with open(os.path.join(OUT, "tab_decisions.tex"), "w") as f:
+    f.write("\n".join(rows) + "\n\\bottomrule\n")
+print("tab_decisions.tex:", len(rows), "rows")

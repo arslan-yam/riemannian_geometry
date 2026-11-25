@@ -1,6 +1,6 @@
 # Result manifest
 
-Commit `73153657ca1b2b1b98f1916c2a707a8fb96ff8f4`, created 2026-11-24T18:49:51 on ARLSANs-MacBook-Air.local.
+Commit `7291eb4710f0175a94ff73feb4d4f40edeacbc7c`, created 2026-11-25T14:07:24 on ARLSANs-MacBook-Air.local.
 
 ## tab:server-ours
 
@@ -674,6 +674,51 @@ Sections 4.4, 6.9; numbers by `scripts/server/review_summary.py`.
 - `review/fu.TJ.k64.json` sha256 `2faafcbc48e8`, 59589 answers, strict violations 1521
 - `review/fu.TJ.k64d.json` sha256 `1f64a569c0a2`, 59589 answers, strict violations 1521
 - `review/fu.TJ.kd.json` sha256 `731c24d70bc1`, 59589 answers, strict violations 1521
+
+## decision workload (go / no-go, coverage, dispatch), truth with the fixed VTP
+
+Table tab:decisions; numbers by `scripts/server/decisions.py`.
+
+- `comp/prox2.AU.pairs` sha256 `cc97a1b4c6c3`
+- `comp/prox2.GI.pairs` sha256 `e501b1e36fb9`
+- `comp/prox2.LH.pairs` sha256 `d294288080b6`
+- `comp/prox2.SC.pairs` sha256 `a5df2a451735`
+- `comp/prox2.TJ.pairs` sha256 `dec6fa80de2d`
+- `comp/prox2.VS.pairs` sha256 `5b47db234d1f`
+- `review/dec/dgg.AU.0.0001.json` sha256 `cbfd5ed3a794`
+- `review/dec/dgg.AU.0.001.json` sha256 `91271dc1107b`
+- `review/dec/dgg.GI.0.0001.json` sha256 `400d6d992162`
+- `review/dec/dgg.GI.0.001.json` sha256 `6ae059828969`
+- `review/dec/dgg.LH.0.0001.json` sha256 `c3d13d98f98f`
+- `review/dec/dgg.LH.0.001.json` sha256 `28bbe2213b1f`
+- `review/dec/dgg.SC.0.0001.json` sha256 `4eadd44a4246`
+- `review/dec/dgg.SC.0.001.json` sha256 `a4c42db0f647`
+- `review/dec/dgg.TJ.0.0001.json` sha256 `dfdcb0cb6f9a`
+- `review/dec/dgg.TJ.0.001.json` sha256 `829268e357f3`
+- `review/dec/dgg.VS.0.0001.json` sha256 `44e5812eae0b`
+- `review/dec/dgg.VS.0.001.json` sha256 `af52be6035a8`
+- `review/dec/lm.GI.json` sha256 `98f285cac79e`
+- `review/dec/lm.TJ.json` sha256 `42e30c0d868a`
+- `review/dec/ours.AU.k64.json` sha256 `6db3bb6f70fc`
+- `review/dec/ours.AU.kd.json` sha256 `44a5b06b63f7`
+- `review/dec/ours.GI.k64.json` sha256 `a9dc807d239a`
+- `review/dec/ours.GI.kd.json` sha256 `b259aac9d992`
+- `review/dec/ours.LH.k64.json` sha256 `bfb115a28c42`
+- `review/dec/ours.LH.kd.json` sha256 `a760b277528c`
+- `review/dec/ours.SC.k64.json` sha256 `ff59d36514c0`
+- `review/dec/ours.SC.kd.json` sha256 `50b0635229e8`
+- `review/dec/ours.TJ.k64.json` sha256 `fc0665610933`
+- `review/dec/ours.TJ.kd.json` sha256 `fc9f399bbf29`
+- `review/dec/ours.VS.k64.json` sha256 `1b68f94a3064`
+- `review/dec/ours.VS.kd.json` sha256 `c9ace7d15108`
+- `review/dec/sep.GI.json` sha256 `069bfbcc4cd0`
+- `review/dec/sep.TJ.json` sha256 `02f97c4925aa`
+- `review/decisions2.AU.json` sha256 `3777ae80e693`
+- `review/decisions2.GI.json` sha256 `0ad5f35116ed`
+- `review/decisions2.LH.json` sha256 `6d33f60d1cae`
+- `review/decisions2.SC.json` sha256 `23767f9934e8`
+- `review/decisions2.TJ.json` sha256 `826dd2632152`
+- `review/decisions2.VS.json` sha256 `a5eaf01b1fe3`
 
 ## review: build repeats and strict checks
 

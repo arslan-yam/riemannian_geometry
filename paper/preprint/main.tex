@@ -85,7 +85,7 @@ average. A kNN query compares the distances of many candidates, a range query co
 planner may need to know that a route is no longer than a limit. With a point estimate of unknown error, every such
 decision is a guess near its boundary; with an interval $\LB\le d\le\UB$ that is guaranteed to contain the exact
 surface distance, most decisions can be made from the intervals alone, and the few that cannot are exactly the ones
-worth computing exactly (Figure~\ref{fig:knn}). An oracle whose answer $\hat d$ is a path length with a guarantee
+worth computing exactly (Figure~\ref{fig:knn}; Table~\ref{tab:decisions} counts them). An oracle whose answer $\hat d$ is a path length with a guarantee
 $\hat d\le(1+\eps)d$ implies the interval $[\hat d/(1+\eps),\hat d]$, but only if the guarantee holds against the
 exact distance without an additive term, which only SE-Oracle's does, for points of interest, and its width is
 always $\eps$. To decide a query, the
@@ -1272,7 +1272,9 @@ VTP gives 4,452.04 and our upper bound is 4,452.4, and a pair for which MMP is $
 the $1.05\cdot10^{-4}$ our upper bound lies below it. We leave the unreached pair out of the error statistics of this
 row. Because our labels on this terrain are MMP sweeps too, a clean test needs VTP for both labels and reference.
 With VTP labels the capped index is sound against the VTP reference, builds in 22\,h instead of 34\,h, and has a mean
-error of 0.030\% and a maximum of 4.6\% (the row marked $\dagger$); the uncapped VTP build is still running. The
+error of 0.030\% and a maximum of 4.6\% (the row marked $\dagger$). VTP pays in memory on this mesh: the capped
+build peaked at 449\,GB, against 15\,GB with MMP labels, and the uncapped one ran out of the node's memory after 51\,h,
+so its row keeps MMP labels and reference. The
 solver cross-check of Section~\ref{sec:index} flags this mesh: MMP and VTP disagree in about one sweep in 500.
 
 \paragraph{kNN and range queries in the POI setting.}
@@ -1309,6 +1311,37 @@ and the index pays where each answer must carry a bound that $\eps$ satisfies, o
 for a few objects. Landmark intervals (Table~\ref{tab:landmarks}) decide kNN by the same rules as ours, but their intervals are too loose
 for it: with 256 landmarks, 57 objects per query remain undecided for $k=10$ and every query needs a sweep, 28\,ms
 end to end, and with 1,024 landmarks 23 objects and 41\,ms, since computing the 10,000 intervals alone takes 35\,ms.
+
+\paragraph{Decisions from the answers.}
+A mean error does not say how many decisions an answer gets wrong. On the 100 queries and 10,000 objects of the
+proximity runs (a million pairs per terrain at 0.5M faces, exact distances by VTP), we let every method decide
+from its answers alone (Table~\ref{tab:decisions}): ``is $d(q,o)\le B$?'' for every pair, with budgets $B$ of 1, 3 and
+10\% of the chart diagonal; a range query of radius $B$; and kNN with $k=1$ and 10. A point method decides by its
+value. An interval method decides from $\LB$ and $\UB$ and computes the distance exactly for the pairs its interval
+cannot decide, so it is wrong only if an interval is unsound, and none of the 18 million intervals was. Ours leave 6
+pairs in a million undecided at the 1\% budget and 1,059 at 10\%, about 11 objects per query, which one sweep from
+the query settles. DGG's values are path lengths, never below $d$: it never says yes wrongly, but with
+$\eps=10^{-3}$ it says no for 215 of the 293,331 pairs within the 10\% budget, all within 0.15\% of $B$, and its
+range queries miss an object in 178 of 600 queries (27 with $10^{-4}$). SEP errs both ways: 282 wrong yes answers
+at 10\%, up to 3.4\% beyond the budget (11\% at 1\%), and a wrong 10-nearest set for 44 of 200 queries. Landmark
+intervals are as safe as ours, but loose near the query: at the 1\% budget they leave 499--531 pairs in a million
+undecided, and a 10-nearest query 24--57 objects, against 0.4 for ours.
+
+\begin{table}[t]
+\caption{Decisions from the answers: 100 queries $\times$ 10,000 objects per terrain at 0.5M faces, budgets and radii
+of 1/3/10\% of the chart diagonal. Unsafe: ``yes'' with $d>B$; lost: ``no'' with $d\le B$; misses: range queries (10\%)
+missing an object; kNN: wrong sets for $k=1$/10; undecided: pairs per million an interval method computes exactly
+(1\%/10\%), and objects per 10-nearest query. Interval methods are wrong only if an interval is unsound.}
+\label{tab:decisions}
+\small
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+method & ter. & unsafe & lost & misses & kNN & undecided & kNN und.\\
+\midrule
+\input{tab_decisions}
+\end{tabular}
+\end{table}
 
 \paragraph{The small terrains on the cluster.}
 Rerunning the small-terrain configurations of Table~\ref{tab:main} on the cluster gives the same picture: on

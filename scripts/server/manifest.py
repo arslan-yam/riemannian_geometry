@@ -39,6 +39,7 @@ ENTRIES = [
     ("review: landmark intervals", "item 3", ["review/landmark.*.json", "review/landmark_sets.*.json"], "scripts/server/review_summary.py"),
     ("review: adversarial terrains", "item 5", ["review/adv.*.json", "review/advvtp.*.json", "review/meshes/*.json"], "scripts/server/review_summary.py"),
     ("follow-up: independent-pair latency, solver cross-check, delta tails", "Sections 4.4, 6.9", ["review/fu.*.json"], "scripts/server/review_summary.py"),
+    ("decision workload (go / no-go, coverage, dispatch), truth with the fixed VTP", "Table tab:decisions", ["review/decisions2.*.json", "review/dec/*.json", "comp/prox2.*.pairs"], "scripts/server/decisions.py"),
     ("review: build repeats and strict checks", "items 4 and 6", ["review/rep*.json", "review/small.*.json"], "scripts/server/review_summary.py"),
 ]
 
